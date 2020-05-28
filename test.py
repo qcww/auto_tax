@@ -6,7 +6,7 @@ import re
 
 class Test:
     def __init__(self):
-        self._cookie = 'aisino-never-guide=Y; UM_distinctid=16eddfcd24317d-06030806055807-32365f08-1fa400-16eddfcd2447eb; yfx_c_g_u_id_10003709=_ck19120715172217790771477836513; yfx_f_l_v_t_10003709=f_t_1575703042755__r_t_1575703042755__v_t_1575703042755__r_c_0; yfx_mr_10003709=%3A%3Amarket_type_free_search%3A%3A%3A%3Abaidu%3A%3A%3A%3A%3A%3A%3A%3Awww.baidu.com%3A%3A%3A%3Apmf_from_free_search; yfx_key_10003709=; JSESSIONID1=kOCSBMJAifmn6oFkltXvp2wbaSxeY4hvy_iZ5cKNb43gKyNZ1d4Y!1528530030; CNZZDATA1277373975=967003065-1569805960-%7C1578700255; aisino-wsbs-session=9d22d5ea-98e6-4bfa-bd46-380086d25b31; JSESSIONID=3E04EFD1CB85C844CCC6BC3C8226CC36; SERVERID=38c77ca8f937ef5cd932d2e4367e94c5|1578704422|1578702783'
+        self._cookie = 'UM_distinctid=171bae57eae353-08300d7c6a0d86-3a36510f-1fa400-171bae57eafea; aisino-never-guide=Y; aisino-wsbs-session=bcb55c05-02d0-4b83-a64a-d99644c748c4; CNZZDATA1277373975=269526059-1587975113-%7C1590641524; JSESSIONID=C7EC385B7FF28C9632A625743692DA07'
         # corp_list = "55||安徽一半一伴咖啡品牌管理有限公司 ||91340100094822207C||wcy123456||2019-08-01||2019-12-01||5"
         # corp_list = "64||安徽百胜医疗管理有限公司 ||91340100094822207C||wcy123456||2019-01-01||2019-12-07||5"
         corp_list = "936||合肥市汇巨装饰工程有限公司 ||91340100MA2MU4JX6P||wcy123456||2019-01-01||2019-12-07||5"
@@ -16,7 +16,19 @@ class Test:
         self.tax_update_url = self.config['link']['tax_update_url']
         self.tax_data_url = self.config['link']['tax_data_url']
         self.sb_url = self.config['link']['sb_data_url']
+        self.tax_kk_url = self.config['link']['tax_kk_url']
+        self.net_bank_url = self.config['link']['net_bank_url']
         self.template = self.config['tax_template']
+
+    # 获取扣款列表及网银列表
+    def get_tax_kk_list(self):
+        # data = {'swjgdm': '13401030000'}
+        # kk_data = self.post_data(self.tax_kk_url,data)
+        # print(kk_data.text)
+        # 网银信息
+        bank_data = self.post_data(self.net_bank_url,{})
+        print(bank_data.text)
+
 
     def get_tax_detail(self):
         data = {'sbrqq': '2019-01-01','sbrqz': '2019-03-01','zsxmDm': '10104'}
@@ -241,4 +253,4 @@ class Test:
 test = Test()
 # res = test.get_sb_detail()
 # print(res)
-test.get_tax_detail()
+test.get_tax_kk_list()

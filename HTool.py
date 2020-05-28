@@ -8,6 +8,7 @@ import os
 import configparser
 import time
 import sys
+import urllib.request
 from time import sleep
 from urllib.parse import urlencode  #Python内置的HTTP请求库
 from selenium import webdriver
@@ -67,33 +68,44 @@ class HTool(HTMLParser):
     def save_ercode_img(self,driver):
         element = driver.find_element_by_xpath("//form[@id='fm3']/div//div/img")
 
-        # 刷新一下
-        Action = ActionChains(driver)# 实例化一个action对象
-        code_click = Action.click(element)
-        code_click.perform()
-        sleep(2)
+        # # 刷新一下
+        # Action = ActionChains(driver)# 实例化一个action对象
+        # code_click = Action.click(element)
+        # code_click.perform()
+        # sleep(2)
         
         screenImg = ''.join(random.sample('zyxwvutsrqponmlkjihgfedcba',5))+'.png'
-        # 浏览器页面截屏
-        driver.get_screenshot_as_file(screenImg)
-        # 定位验证码位置及大小
-        location = element.location
-        size = element.size
+        img_url = element.get_attribute('src')
 
-        # 获取验证码定位
-        left = location['x']
-        top = location['y']
-        right = location['x'] + size['width']
-        bottom = location['y'] + size['height']
-        # 从文件读取截图，截取验证码位置再次保存
-        img = Image.open(screenImg).crop((left, top, right, bottom))
-        #下面对图片做了一些处理
-        img = img.convert('RGBA')  # 转换模式：L | RGB
-        img = img.convert('L')  # 转换模式：L | RGB
-        img = ImageEnhance.Contrast(img)  # 增强对比度
-        img = img.enhance(2.0)  # 增加饱和度
-        img.save(screenImg)
+        #保存图片数据  
+        data = urllib.request.urlopen(img_url).read()
+        f = open(screenImg, 'wb')
+        f.write(data)
+        f.close()
         return screenImg
+
+        # # 浏览器页面截屏
+        # driver.get_screenshot_as_file(screenImg)
+        # # 定位验证码位置及大小
+        # location = element.location
+        # print('location',location)
+        # size = element.size
+
+        # # 获取验证码定位
+        # left = location['x']
+        # top = location['y']
+        # right = location['x'] + size['width']
+        # bottom = location['y'] + size['height']
+        # # 从文件读取截图，截取验证码位置再次保存
+        # print('ltrb')
+        # img = Image.open(screenImg).crop((left, top, right, bottom))
+        # #下面对图片做了一些处理
+        # img = img.convert('RGBA')  # 转换模式：L | RGB
+        # img = img.convert('L')  # 转换模式：L | RGB
+        # img = ImageEnhance.Contrast(img)  # 增强对比度
+        # img = img.enhance(2.0)  # 增加饱和度
+        # img.save(screenImg)
+        # return screenImg
 
     # 默认按三个月拆分
     def split_time(self,sbrqq,sbrqz,period = 3):

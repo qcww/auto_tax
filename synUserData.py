@@ -16,7 +16,8 @@ def on_close(ws):
 
 def on_open(ws):
     ws.send('{"type":"login","room_id":"0da851c3bb31aaf458919479dcb726f0","client_name":"%s"}' % 'tax_ah4')
-    post = ("44","公司","91340100094822207C","wcy123456","2019-01-01","2019-01-30","5")
+    # post = ("44","公司","91340100094822207C","wcy123456","2019-01-01","2019-01-30","5")
+    post = ("44","安徽阳升源商贸有限公司","91340100MA2RAQ7F88","ysy123456","2019-01-01","2019-01-30","7")
     post_data = '||'.join(post)
     ws.send('{"type":"action","reply":"1","room_id":"0da851c3bb31aaf458919479dcb726f0","data":"%s","client_name":"tax_ah4"}' % post_data)
 

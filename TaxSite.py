@@ -44,6 +44,14 @@ class TaxSite:
         self.new_tax_url = config['link']['new_tas_url']
         self.tax_update_url = config['link']['tax_update_url']
         self.sb_url = config['link']['sb_data_url']
+
+        # 税务扣款地址
+        self.kk_page_url = config['link']['kk_page_url']
+        self.tax_kk_url = config['link']['tax_kk_url']
+        self.net_bank_url = config['link']['net_bank_url']
+        # 税务扣款提交页面
+        self.kk_submit_url = config['link']['kk_submit_url']
+
         self.template = config['tax_template']
         self.run_status = {"receive_num":0,"success_num":0,"faild_num":0,"pass_err_num":0}
         self.run_status_name = {"receive_num":"接收","success_num":"成功","faild_num":"失败","pass_err_num":"密码错误"}
@@ -160,6 +168,7 @@ class TaxSite:
         htool = HTool()
         local_img = htool.save_ercode_img(self.driver)
         res = htool.send_img(local_img)
+
         if res['parse']:
             return res['parse']
         else:
@@ -225,7 +234,10 @@ class TaxSite:
                 msg.append(self.get_tax_detail())
             if a == '6':
                 self.insert_log('更新社保信息')
-                msg.append(self.get_sb_detail())    
+                msg.append(self.get_sb_detail())
+            if a == '7':
+                self.insert_log('税款缴纳')
+                msg.append(self.do_tax_kk())
         self.driver.quit()        
         return self.corpname + ':' +','.join(msg)
 
@@ -705,5 +717,94 @@ class TaxSite:
             pass
         return ret_msg
 
+    # 税款缴纳
+    def do_tax_kk(self):
+        # 获取缴款账户，如果没有账户直接跳过，如果有多个
+        bank_data = self.post_data(self.net_bank_url,{})
+
+
+        if bank_data.status_code == 200:
+            bank_json = json.loads(bank_data.text)
+            bank_num = len(bank_json['data'])
+            if bank_num == 0:
+                ret_msg = '未添加扣款账户，扣款失败'
+                return ret_msg
+        else:
+            ret_msg = '获取扣款账户失败'
+            return ret_msg
+
+
+        self.driver.get(self.kk_page_url)
+        return self.do_tax_kk_action(bank_num)
+
+
+    # 循环扣款，直到失败停止
+    def do_tax_kk_action(self,bank_num):
+        # 获取扣款数据
+        data = {'swjgdm': '13401030000'}
+        kk_data = self.post_data(self.tax_kk_url,data)
+        
+        # 获取页面中待扣款个数
+        if kk_data.status_code == 200:
+            kk_json = json.loads(kk_data.text)
+            kk_item_num = len(kk_json['data'])
+        else:
+            return '扣款失败,获取未缴款信息时发生错误'
+
+        if kk_item_num == 0:
+            return '扣款成功,未缴款信息为空'
+
+        sleep(5)
+        bank_select = str(bank_num - 1)
+        self.driver.execute_script("$('input[name=btSelectItem]').click();$('#sfxyTable input[name=btSelectItem]').eq("+bank_select+").click()")
+        kk_post_data = self.driver.execute_script("oneCheckFormData();return getTjsj()")
+
+        parse = {}
+        js_arr = kk_post_data.split('&')
+        for i in js_arr:
+            sp_arr = i.split('=')
+            parse[sp_arr[0]] = sp_arr[1]
+        print('扣款提交数据',parse)
+
+        # 通过应征凭证序号找到缴款项目
+        kk_name_arr = []
+        ssqq = ssqz = ''
+        for item in kk_json['data']:
+            if item['yzpzxh'] == parse['yzpzxh']:
+                ssqq = item['skssqq']
+                ssqz = item['skssqz']
+                kk_name_arr.append(item['zsxmMc'])
+
+        kk_item_name = '、'.join(kk_name_arr)
+        # 对接接口提交数据
+        kk_post_data = {"kk_status":2,"skssqq":ssqq,"skssqz":ssqz,"zsxmMc":kk_item_name,"msg":""}
+        print('kk_post_data',kk_post_data)
+
+        kk_ret = self.post_data(self.kk_submit_url,parse)
+        if kk_ret.status_code == 200:
+            kk_json = json.loads(kk_ret.text)
+            print('扣款结果',kk_json)
+            if kk_json['code'] == 200:
+                # 扣款成功,继续扣款
+                kk_post_data['kk_status'] = 1
+                self.insert_log(kk_item_name+',扣款成功')
+                return self.do_tax_kk_action(bank_num)
+            else:
+                # 多个账户时可以轮流扣款
+                if bank_num > 1:
+                    bank_num -= 1
+                    return self.do_tax_kk_action(bank_num)
+                else:
+                    err_msg = '扣款失败，'+kk_item_name+kk_json['error']['errorMsgs'][0]
+                    kk_post_data['msg'] = err_msg
+                    return err_msg
+        else:            
+            err_msg = kk_item_name+'提交扣款信息失败'
+            self.insert_log(err_msg)
+            kk_post_data['msg'] = err_msg
+            return err_msg    
+
     def insert_log(self,msg,site = 0):
         self.lb.insert(site, ' '+time.strftime("%H:%M:%S", time.localtime())+' - '+msg)
+
+        
