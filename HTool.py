@@ -4,9 +4,11 @@ import requests
 import json
 import re
 import random
+import regedit
 import os
 import configparser
 import time
+import datetime
 import sys
 import urllib.request
 from time import sleep
@@ -25,7 +27,8 @@ class HTool(HTMLParser):
      
 
     def __init__(self):
-        self.config_file = 'config.ini'
+        self.config_file = "config.ini"
+        self.uid,_ = regedit.get_pc_id()
         self.config = configparser.ConfigParser()
         self.config.read(self.config_file,encoding='utf-8')
         self.sb_table_url = self.config['link']['sb_table_url']
@@ -74,38 +77,27 @@ class HTool(HTMLParser):
         # code_click.perform()
         # sleep(2)
         
-        screenImg = ''.join(random.sample('zyxwvutsrqponmlkjihgfedcba',5))+'.png'
+        save_name = ''.join(random.sample('zyxwvutsrqponmlkjihgfedcba',5))+'.png'
         img_url = element.get_attribute('src')
 
         #保存图片数据  
         data = urllib.request.urlopen(img_url).read()
-        f = open(screenImg, 'wb')
+        f = open(save_name, 'wb')
         f.write(data)
         f.close()
-        return screenImg
+        self.convert_img(save_name)
+        return save_name
 
-        # # 浏览器页面截屏
-        # driver.get_screenshot_as_file(screenImg)
-        # # 定位验证码位置及大小
-        # location = element.location
-        # print('location',location)
-        # size = element.size
-
-        # # 获取验证码定位
-        # left = location['x']
-        # top = location['y']
-        # right = location['x'] + size['width']
-        # bottom = location['y'] + size['height']
-        # # 从文件读取截图，截取验证码位置再次保存
-        # print('ltrb')
-        # img = Image.open(screenImg).crop((left, top, right, bottom))
-        # #下面对图片做了一些处理
-        # img = img.convert('RGBA')  # 转换模式：L | RGB
-        # img = img.convert('L')  # 转换模式：L | RGB
-        # img = ImageEnhance.Contrast(img)  # 增强对比度
-        # img = img.enhance(2.0)  # 增加饱和度
-        # img.save(screenImg)
-        # return screenImg
+    def convert_img(self,save_name):
+        img = Image.open(save_name).crop((0, 0, 60, 30))
+        pixels = img.load()
+        for i in range(img.size[0]):
+            for j in range(img.size[1]):
+                if (pixels[i,j][0] > 100 or pixels[i,j][1] > 100 or pixels[i,j][2] > 100) and pixels[i,j] != (0,0,0):
+                    pixels[i,j] = (254, 255, 255)
+                else:
+                    pixels[i,j] = (0, 0, 0)
+        img.save(save_name)
 
     # 默认按三个月拆分
     def split_time(self,sbrqq,sbrqz,period = 3):
@@ -143,13 +135,14 @@ class HTool(HTMLParser):
         return json.loads(r.text)
 
 	# 获取浏览器cookie resquest post请求获取数据
-    def post_data(self,_cookie,url,data):
+    def post_data(self,_cookie,url,data,header_add = {}):
         header = {
             'Origin': 'https://etax.anhui.chinatax.gov.cn',
             # 'Host': 'etax.anhui.chinatax.gov.cn', 
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/69.0.3497.100 Safari/537.36',
             'Cookie':_cookie
         }
+        header = dict(header,**header_add)
         sleep(1)
         r = requests.post(url, data=data,headers=header)
         return r
@@ -199,6 +192,43 @@ class HTool(HTMLParser):
         a = self.sb_table_url + b
         return a
 
+    def get_month_range(self,start_day,end_day):
+        end_arr = end_day.split('-')
+        start_arr = start_day.split('-')
+        period_arr = []
+        # 时间检验
+        if (int(end_arr[0] + end_arr[1])) < int(start_arr[0] + start_arr[1]):
+            print('开始时间大于结束时间')
+            return []
+
+        year_dec = int(end_arr[0]) - int(start_arr[0]) + 1
+        for i in range(year_dec):
+            app_year = str(int(end_arr[0]) - i)
+            if i == 0:
+                month_dec = int(end_arr[1])
+                if year_dec == 1:
+                    range_period = int(end_arr[1]) - int(start_arr[1]) + 1
+                else:    
+                    range_period = month_dec
+            else:
+                month_dec = int(end_arr[1])
+                range_period = 12
+
+            for m in range(range_period):
+                if i == 0:
+                    month = str(int(end_arr[1]) - m)
+                    if int(month) == int(start_arr[1])-1 and year_dec == 1:
+                        print('这里接技术')
+                        break
+                else:
+                    month =  str(12 - m)
+                    if int(month) == int(start_arr[1])-1:
+                        print('这里结束')
+                        break
+                period_arr.append("%s-%02d-01" % (app_year,int(month)))
+
+        return period_arr
+
     # 读取 配置>option>key 的值
     def get_config(self,section,key):
         return re.sub(r'#53','%',self.config.get(section,key))
@@ -208,3 +238,53 @@ class HTool(HTMLParser):
         set_val = str(value)
         self.config.set(section,key,re.sub(r'%','#53',set_val.strip('|')))
         self.config.write(open(self.config_file,'w',encoding='utf-8'))
+
+    #关闭弹框
+    def driver_close_alert(self,driver,limit = 1,ret = []):
+        try:
+            dig_alert = driver.switch_to.alert
+            ret.append(dig_alert.text)
+            dig_alert.accept()
+        except:
+            pass
+        limit -= 1
+        if limit > 0:
+            sleep(0.5)
+            return self.driver_close_alert(driver,limit)
+        return ret
+
+    # 返回本月最后一天日期
+    def last_day_of_month(self):
+        now_time = datetime.datetime.now()
+        year = int(now_time.year)
+        month = int(now_time.month)
+        day = int(now_time.day)
+        any_day = datetime.date(year, month, day)
+        
+        next_month = any_day.replace(day=28) + datetime.timedelta(days=4)  # this will never fail
+        return next_month - datetime.timedelta(days=next_month.day)
+
+    # 返回几个月第一个天和最后一天的日期时间
+    def month_get(self,period):
+        d = datetime.datetime.now()
+        dayscount = datetime.timedelta(days=d.day)
+        dayto = d - dayscount
+        date_to = datetime.datetime(dayto.year, dayto.month, dayto.day, 23, 59, 59).strftime("%Y-%m-%d")
+        if period > 0:
+            date_from = self.get_month_first(period)
+        else:
+            date_from = date_to    
+        return date_from, date_to
+
+    # 返回几个月前第一天
+    def get_month_first(self, n):
+        d = datetime.datetime.today()
+        month = d.month
+        year = d.year
+        for i in range(n):
+            if month == 1:
+                year -= 1
+                month = 12
+            else:
+                month -= 1
+        return datetime.date(year, month, 1).strftime('%Y-%m-01')

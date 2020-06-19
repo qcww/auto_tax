@@ -40,7 +40,8 @@ class AutoTax:
 
         # 添加与采集按钮
         tk.Button(window, textvariable=self.run_text, width=10, height=1, command=self.start_app).place(x=490, y=15)
-        tk.Button(window, text="失败重试", width=10, height=1, command=self.retry).place(x=490, y=50)
+        tk.Button(window, text="自动扣款", width=10, height=1, command=self.add_kk_task).place(x=490, y=50)
+        tk.Button(window, text="失败重试", width=10, height=1, command=self.retry).place(x=490, y=85)
 
         # 成功个数与失败个数
         tk.Label(window,textvariable=self.status_bar["receive_num"]).place(x=15,y=440)
@@ -68,6 +69,7 @@ class AutoTax:
         self.insert_log('读取配置文件成功')
         self.run_status = False
         self.retry_status = False
+        self.kk_status = False
         self.is_running = False
 
         self.tax_site = TaxSite(self.lb,self.status_bar)
@@ -84,46 +86,56 @@ class AutoTax:
         self.status_bar['his_err_num'].set("待处理：%s" % len(self.err_arr))
 
     def syn_user_data(self,corp_data):
-        if corp_data == None:
-            return False
-        print(corp_data)
-        self.is_running = True
-        corpid = self.tax_site.set_corp(corp_data)
+        try:
+            if corp_data == None:
+                return False
+            if corp_data == 'bundle||7':
+                return self.add_kk_task()
+            self.is_running = True
+        
+            corpid = self.tax_site.set_corp(corp_data)
 
-        self.tax_site.open_browser()
-        login_res = self.tax_site.login()
-        # 登录失败，跳过
-        if login_res == False:
-            rt = '登录失败'
-        else:
-            self.tax_site.page_init()
-            rt = self.tax_site.driver_auto_action()
-            
-        if '成功' in rt and '失败' not in rt:
-            if corpid in self.err_arr:
-                del self.err_arr[corpid]
-            self.tax_site.status_count("success_num")
-        else:
-            self.err_arr[corpid] = corp_data
-            self.tax_site.status_count("faild_num")
-        self.is_running = False
-        self.status_bar['his_err_num'].set("待处理：%s" % len(self.err_arr))
-        self.htool.set_config('scrap','err_list',json.dumps(self.err_arr))
-        return rt
+            self.tax_site.open_browser()
+            login_res = self.tax_site.login()
+            # 登录失败，跳过
+            if login_res == False:
+                rt = '登录失败'
+            else:
+                self.tax_site.page_init()
+                rt = self.tax_site.driver_auto_action()
+                
+            if '成功' in rt and '失败' not in rt:
+                if corpid in self.err_arr:
+                    del self.err_arr[corpid]
+                self.tax_site.status_count("success_num")
+            else:
+                self.err_arr[corpid] = corp_data
+                self.tax_site.status_count("faild_num")
+            self.is_running = False
+            self.status_bar['his_err_num'].set("待处理：%s" % len(self.err_arr))
+            self.htool.set_config('scrap','err_list',json.dumps(self.err_arr))
+            return rt
+        except :
+            self.is_running = False
+            return '发生了未知错误'
+ 
 
     def create_websocket(self):
         def on_message(ws, message):
+            print(message)
             msg = json.loads(message)
             if msg['type'] == 'action' and msg['data'] != '':
                 self.lb.insert(0, "")
                 rt = self.syn_user_data(msg['data'])
-                reply = '{"type":"reply","isfree":1,"room_id":"%s","data":"%s","client_name":"%s","request_client_id":"%s"}' % (self.config['clien']['room_id'],rt,self.config['clien']['name'],msg['request_client_id'])
-                self.insert_log(rt)
-                ws.send(reply)
+            #     reply = '{"type":"reply","isfree":1,"room_id":"%s","data":"%s","client_name":"%s","request_client_id":"%s"}' % (self.config['clien']['room_id'],rt,self.config['clien']['name'],msg['request_client_id'])
+            #     print('回复',rt)
+            #     self.insert_log(rt)
+            #     # ws.send(reply)
 
         def on_error(ws, error):
             self.run_status = False
-            self.insert_log(error)
+            print('啥几把错误',error)
+            # self.insert_log(error)
 
 
         def on_close(ws):
@@ -156,14 +168,6 @@ class AutoTax:
             self.mythread = threading.Thread(target=self.create_websocket)
             self.cond = threading.Condition() # 锁
             self.mythread.start()
-
-        if self.run_status == True:
-            # self.run_text.set('启动中')
-            self.run_text.set('运行中')
-        else:
-            delattr(self,'mythread')
-            self.ws.close()
-            self.run_text.set('停止中')
         
     def retry_action(self):
         retry_list = self.err_arr.copy()
@@ -192,5 +196,37 @@ class AutoTax:
         self.retry_status = True
         mythread = threading.Thread(target=self.retry_action)
         mythread.start()
+
+    def add_kk_task(self):
+        # 如果是正在运行的话结束脚本
+        # if self.run_status == True:
+        #     self.start_app()
+
+        if self.is_running == True:
+            tip = '请等待当前脚本执行结束后重试'
+            tkinter.messagebox.showinfo('提示',tip)
+            return tip
+
+        if self.kk_status == True:
+            tip = '正在运行任务'
+            tkinter.messagebox.showinfo('提示',tip)
+            return tip
+        self.kk_status = True
+        mythread = threading.Thread(target=self.kk_action)
+        mythread.start()
+        return '已收到消息，正在执行中'
+
+    def kk_action(self):
+        kk_list = self.tax_site.get_kk_data()
+        for re in kk_list:
+            post = (re['corpid'],re['corpname'],re['credit_code'],re['tax_pwd_gs'],"","","7")
+            post_data = '||'.join(post)
+            self.lb.insert(0, "")
+            rt = self.syn_user_data(post_data)
+
+        if len(kk_list) > 0:
+            return self.kk_action()
+        else:    
+            self.kk_status = False
 
 auto = AutoTax()
