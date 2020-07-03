@@ -1,21 +1,25 @@
 # -*- coding: UTF-8 -*- 
 from HTool import HTool
+import requests
 import json
 import sys
 import re
 import time
 import datetime
+import urllib.request
+from time import sleep
 from urllib.parse import urlparse
 from urllib.parse import parse_qs
 from bs4 import BeautifulSoup
 from PIL import Image, ImageEnhance
+from SbSite import Export
 
 class Test:
     def __init__(self):
-        self._cookie = 'UM_distinctid=171bae57eae353-08300d7c6a0d86-3a36510f-1fa400-171bae57eafea; aisino-never-guide=Y; JSESSIONID=420836A233E147CE05384CA4B1B7EDCA; aisino-wsbs-session=f07b09ea-fc0e-4e9c-ae4e-e6c558371794; CNZZDATA1277373975=269526059-1587975113-%7C1592390772'
+        self._cookie = 'UM_distinctid=171bae57eae353-08300d7c6a0d86-3a36510f-1fa400-171bae57eafea; aisino-never-guide=Y; CNZZDATA1277373975=269526059-1587975113-%7C1593649685; aisino-wsbs-session=b2f762f6-4d77-419f-8a24-a01384ab1b0e; JSESSIONID=B7AEC1F61D979DE85DAF1BC280F6B9A5'
         # corp_list = "55||安徽一半一伴咖啡品牌管理有限公司 ||91340100094822207C||wcy123456||2019-08-01||2019-12-01||5"
         # corp_list = "64||安徽百胜医疗管理有限公司 ||91340100094822207C||wcy123456||2019-01-01||2019-12-07||5"
-        corp_list = "3491||合肥崇武商贸有限公司||91340100MA2MW65Q6Y||wcy123456||2020-05-01||2020-06-06||5"
+        corp_list = "419||合肥海博一品展示用品有限公司||91340121348752721T||wcy123456||2020-05-01||2020-06-06||5"
         self.corpid, self.corpname, self.credit_code, self.pwd, self.sbrqq, self.sbrqz,self.action = corp_list.split('||',7)
         self.htool = HTool()
         self.config = self.htool.rt_config()
@@ -29,12 +33,12 @@ class Test:
         self.kk_update_url = self.config['link']['kk_update_url']
         self.bundle_kk_status_url = self.config['link']['bundle_kk_status_url']
         self.dkfp_detail_url = self.config['link']['dkfp_detail_url']
-        self.ready_tax_url = self.config['link']['ready_tax_url']
         self.tax_info_url = self.config['link']['tax_info_url']
         self.tax_config_info = self.config['tax_config_info']
         self.zzfp_detail_url = self.config['link']['zzfp_detail_url']
         self.agent_invoice_url = self.config['link']['agent_invoice_url']
         self.agent_invoice_detail_url = self.config['link']['agent_invoice_detail_url']
+        self.agent_list_url = self.config['link']['agent_list_url']
         
 
     # 获取扣款列表及网银列表
@@ -95,7 +99,8 @@ class Test:
                     if sb_data.status_code == 200:
                         # 残疾保障金页面数据需要提交form跳转页面获取
                         if parse_match_temp['temp_id'] == '3':
-                            sb_data = self.new_tax_page(sb_data.text)
+                            # sb_data = self.new_tax_page(sb_data.text)
+                            pass
                         
                         initData = re.search(r''+parse_match_temp['re_match_name']+'.{10,};',sb_data.text).group(0)
                         initData = initData.replace(parse_match_temp['re_match_name'],'').strip("\";'")
@@ -442,10 +447,22 @@ class Test:
             if self.template['sb_fee_num'] in cate_name:
                 return json.dumps({"jfrs":d['jfrs']})
 
-    # 使用driver post获取数据
-    def post_data(self,url,data):
-        htool = HTool()
-        post_res = htool.post_data(self._cookie,url,data)
+	# 获取浏览器cookie resquest post请求获取数据
+    def post_data(self,url,data,header_add = {},retry = 3):
+        header = {
+            'Origin': 'https://etax.anhui.chinatax.gov.cn',
+            # 'Host': 'etax.anhui.chinatax.gov.cn', 
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/69.0.3497.100 Safari/537.36',
+            'Cookie':self._cookie
+        }
+        header = dict(header,**header_add)
+        sleep(1)
+        post_res = requests.post(url, data=data,headers=header)
+        if post_res.status_code != 200 and retry > 0:
+            retry -= 1
+            sleep(5 - retry)
+            print(post_res.text)
+            return self.post_data(url,data,driver,header_add,retry)
         return post_res
 
     # 使用driver get获取数据
@@ -544,30 +561,34 @@ class Test:
 
         return gl_dict
 
+
     # 代开发票查询
     def dkfp_search(self):
         kjrq = time.strftime("%Y-%m-01",time.localtime())
         data = {'kjrqq': '2020-01-01','kjrqz': kjrq}
-        ret_msg = '获取已代开发票数据失败'
+        ret_msg = '获取代开发票数据失败'
         # try:
         # 发票开具信息查询
         dkfp_ret = self.post_data(self.dkfp_data_url,data)
        
         if dkfp_ret.status_code == 200:
             dkfp_data = json.loads(dkfp_ret.text)
-            post_agent = self.post_data(self.agent_invoice_url,{"corpid":self.corpid,"rows_data":json.dumps(dkfp_data['data'])})
-            print(post_agent.text)
+            post_agent = self.post_data(self.agent_invoice_url,{"corpid":self.corpid,"msg":"自动更新开票信息成功，获取 %s 条数据" % len(dkfp_data['data']),"rows_data":json.dumps(dkfp_data['data'])})
+            print("代开发票",dkfp_data['data'],post_agent.text)
             fp_detail = self.dkfp_detail(1)
             # print(fp_detail)
-            post_fp = self.post_data(self.agent_invoice_detail_url,{"corpid":self.corpid,"rows_data":json.dumps(fp_detail)})
-            # print(post_fp.text)
+            post_fp = self.post_data(self.agent_invoice_detail_url,{"corpid":self.corpid,"msg":"自动更新发票申请信息成功,获取 %s 条数据" % len(fp_detail),"rows_data":json.dumps(fp_detail)})
+            print("发票详情上传",fp_detail,post_fp.text)
             # except:
             #     return ret_msg
+            # self.taxObj.remove_task()
+        else:
+            print(ret_msg)
 
     def dkfp_detail(self,pageNum):
         # 发票申请
-        data = {'pageSize': '2','pageNum': pageNum,'formType':'A02'}
-        ret_msg = '获取代开发票申请数据失败'
+        data = {'pageSize': '20','pageNum': pageNum,'formType':'A02'}
+        # ret_msg = '获取代开发票申请数据失败'
         # try:
         dkfp_data = self.post_data(self.dkfp_detail_url,data)
         if dkfp_data.status_code == 200:
@@ -578,6 +599,9 @@ class Test:
                 for dk in dkfp_json['data']['rows']:
                     app_time_arr = dk['createtime'].split('-')
                     if int(app_time_arr[0]) < 2020:
+                        continue
+                    # 只获取状态为已办理的数据
+                    if dk['stacode'] != '13':
                         continue
 
                     d_link = self.zzfp_detail_url + dk['data_ID']
@@ -608,10 +632,29 @@ class Test:
                     ret_json.append(row_detail)
                     # print(pro_list)
                 return ret_json
+            else:
+                return []
         # except:
         #     print('解析错误')
         #     return ret_msg
 
+    def dkfp_bs_search(self):
+        data = {'kjms':'mxkj','skssqq': '2020-04-01','skssqz':'2020-06-30','rtkrqq':'','rtkrqz':'','kpsjq':'','kpsjz':'','sz':''}
+        # ret_msg = '获取代开发票申请数据失败'
+        # try:
+        dkfp_data = self.post_data(self.agent_list_url,data)
+        if dkfp_data.status_code == 200:
+            tax_json = json.loads(dkfp_data.text)
+            tax_data = tax_json['data']
+            dk_val = {}
+            for jj in tax_data:
+                if jj['skssqz'][:7] != jj['skssqq'][:7]:
+                    continue
+                if jj['zsxmDm'] not in dk_val:
+                    dk_val[jj['zsxmDm']] = float(jj['sjje'])
+                else:
+                    dk_val[jj['zsxmDm']] += float(jj['sjje'])
+            print(dk_val)             
 
     # 税费（种）认定信息 
     def ready_tax_info(self):
@@ -677,12 +720,12 @@ class Test:
                     if int(mm) > 6 and it[4] == '年':
                         continue
 
-                    tax_bd = json.loads(self.tax_config_info['ah'])
+                    tax_bd = json.loads(self.tax_config_info['ah_tax'])
                     for cf in tax_bd:
                         if it[2] in cf['keyword']:
                             sz_bddm = cf['bddm']
                             if ((sz_bddm + it[4]) not in tax_dict) and (sz_bddm+":"+ssqq not in already_tax):
-                                tax_dict[(sz_bddm + it[4])] = {"bddm":sz_bddm,"ss_period":ss_period,"ssqq":ssqq,"tax_link":self.tax_config_info['sb_url_pre'] + "bddm=%s&ssqq=%s&ssqz=%s" % (sz_bddm,ssqq,ssqz)}
+                                tax_dict[(sz_bddm + it[4])] = {"bddm":sz_bddm,"ss_period":ss_period,"ssqq":ssqq,"tax_link":self.tax_config_info['ah_sb_url_pre'] + "bddm=%s&ssqq=%s&ssqz=%s" % (sz_bddm,ssqq,ssqz)}
 
             # print(tax_dict,already_tax)
         except:
@@ -691,52 +734,6 @@ class Test:
 
         return tax_dict
 
-
-    # 报税
-    def tax_sb(self):
-        data = {'gdslx': ''}
-        ret_msg = ''
-        # try:
-        ready_tax = self.post_data(self.ready_tax_url,data)
-        # print(ready_tax.text)
-        if ready_tax.status_code == 200:
-            tax_json = json.loads(ready_tax.text)
-            # print(tax_json['data']) 
-            # 解析链接中绑定代码分批次报税
-            tax_sb_it = {}
-            for tax in tax_json['data']:
-                parse_link = urlparse(tax['url'],'',True)
-                # print(parse_link.query)
-
-                pp = parse_qs(parse_link.query)
-                # print(pp)
-                # 确定有哪些申报项目及品目
-                bddm = pp['bddm'][0]
-                if 'zspmDm' in pp:
-                    pmdm = pp['zspmDm'][0]
-                else:
-                    pmdm = ''    
-                if bddm not in tax_sb_it:
-                    tax_sb_it[bddm] = [pmdm]
-                    self.do_tax_sb(tax['url'],bddm)
-
-                # split_result=urlsplit(url)
-                # print(split_result)
-        # except:
-        #     ret_msg = '获取代办事项失败'
-        #     return ret_msg
-
-    def do_tax_sb(self,tax_url,bddm):
-        # 打开网页，获取数据
-        # 通用申报
-        if bddm == 'TYSB100':
-            print(bddm)
-            self.driver.get(tax_url)
-            sleep(3)
-            sb_data = self.driver.execute_script("return $('#sbbTable').table('getData');")
-            print('待申报数据',sb_data)
-        else:
-            print(bddm,'对应的报税方法正在完善')    
 
     def insert_log(self,msg):
         print(msg)    
@@ -763,30 +760,12 @@ test = Test()
 # tax = test.ready_tax_info()
 # print(tax)
 
-def convert_img():
-    img = Image.open('yjbot.png').crop((0, 0, 60, 30))
-    pixels = img.load()
-    for i in range(img.size[0]):
-        for j in range(img.size[1]):
-            print(pixels[i,j])
-            if (pixels[i,j][0] > 100 or pixels[i,j][1] > 100 or pixels[i,j][2] > 100) and pixels[i,j] != (0,0,0):
-                pixels[i,j] = (254, 255, 255)
-                # if pixels[i,j] == (225, 225, 225):
-                #     pixels[i,j] = (1)
-                # elif pixels[i,j] == (76, 76, 76):
-                #     pixels [i,j] = (2)
-                # else: pixels[i,j] = (1)
-            else:
-                pixels[i,j] = (0, 0, 0)
-            # pixels[i,j] = (254, 255, 255)
-    img.save('example.png')
+# 税务局代开发票金额查询
+test.dkfp_bs_search()
 
-    # img = Image.open(screenImg).crop((left, top, right, bottom))
-    #下面对图片做了一些处理
-    # img = img.convert('RGBA')  # 转换模式：L | RGB
-    # img = img.convert('L')  # 转换模式：L | RGB
-    # img = ImageEnhance.Contrast(img)  # 增强对比度
-    # img = img.enhance(2.0)  # 增加饱和度
-    # img.save('example.png')
-
-convert_img()
+# sb_site = Export()
+# sb_site.open_browser()
+# login_ret = sb_site.login()
+# if login_ret == False:
+#     print('登录失败')
+# sb_site.get_sb_data()

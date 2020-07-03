@@ -23,15 +23,14 @@ class HTool(HTMLParser):
 
     a_text = False
     content_array = []
-    upload_code_img_url = 'http://toa.hfxscw.com/?r=ocr/parse-code-img' # 上传并解析验证码的地址
      
-
     def __init__(self):
         self.config_file = "config.ini"
         self.uid,_ = regedit.get_pc_id()
         self.config = configparser.ConfigParser()
         self.config.read(self.config_file,encoding='utf-8')
         self.sb_table_url = self.config['link']['sb_table_url']
+        self.parse_code_img_url = self.config['link']['parse_code_img_url']
 
     def rt_config(self):
         return self.config    
@@ -67,24 +66,31 @@ class HTool(HTMLParser):
         
         return self.table_array
 
-    # 使用截屏方式保存验证码
-    def save_ercode_img(self,driver):
-        element = driver.find_element_by_xpath("//form[@id='fm3']/div//div/img")
+    def get_cookie(self,driver):
+        # if self._cookie:
+        #     return
+        cookies = driver.get_cookies()
+        _cookie = ''
+        for item in cookies:
+            _cookie = _cookie + item['name']+'='+item['value']+';'
+        return _cookie    
 
-        # # 刷新一下
-        # Action = ActionChains(driver)# 实例化一个action对象
-        # code_click = Action.click(element)
-        # code_click.perform()
-        # sleep(2)
-        
+    # 使用截屏方式保存验证码
+    def save_ercode_img(self,driver,xpath):
+        element = driver.find_element_by_xpath(xpath)
+
         save_name = ''.join(random.sample('zyxwvutsrqponmlkjihgfedcba',5))+'.png'
         img_url = element.get_attribute('src')
 
-        #保存图片数据  
-        data = urllib.request.urlopen(img_url).read()
-        f = open(save_name, 'wb')
-        f.write(data)
-        f.close()
+        #保存图片数据
+        img_ret = self.get_data(img_url,driver)
+        # data = urllib.request.urlopen(img_url).read()
+        # f = open(save_name, 'wb')
+        # f.write(data)
+        # f.close()
+        with open(save_name, "wb") as f:
+            for chunk in img_ret.iter_content(chunk_size=512):
+                f.write(chunk)
         self.convert_img(save_name)
         return save_name
 
@@ -115,19 +121,14 @@ class HTool(HTMLParser):
         qz_time = time.localtime(sbrqz_time)
         return time.strftime("%Y-%m-%d",qq_time),time.strftime("%Y-%m-%d",qz_time),end
 
-
-
     # 上传图片
     def send_img(self,img_path, img_type='image/png'):
         file_handle = open(img_path, 'rb')
-
         headers={
             'User-Agent':'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/77.0.3865.90 Safari/537.36'} 
         file = {'image':(img_path, file_handle, 'image/png')}
-        r = requests.post(url=self.upload_code_img_url, headers=headers,files=file)
-
+        r = requests.post(url=self.parse_code_img_url, headers=headers,files=file)
         file_handle.close()
-
         try:
             os.remove(img_path)
         except(FileNotFoundError):
@@ -135,7 +136,10 @@ class HTool(HTMLParser):
         return json.loads(r.text)
 
 	# 获取浏览器cookie resquest post请求获取数据
-    def post_data(self,_cookie,url,data,header_add = {}):
+    def post_data(self,url,data,driver = '',header_add = {},retry = 3):
+        _cookie = ''
+        if driver != '':
+            _cookie = self.get_cookie(driver)
         header = {
             'Origin': 'https://etax.anhui.chinatax.gov.cn',
             # 'Host': 'etax.anhui.chinatax.gov.cn', 
@@ -144,10 +148,18 @@ class HTool(HTMLParser):
         }
         header = dict(header,**header_add)
         sleep(1)
-        r = requests.post(url, data=data,headers=header)
-        return r
+        post_res = requests.post(url, data=data,headers=header)
+        if post_res.status_code != 200 and retry > 0:
+            retry -= 1
+            sleep(5 - retry)
+            print(post_res.text)
+            return self.post_data(url,data,driver,header_add,retry)
+        return post_res
         
-    def get_data(self, _cookie, url):
+    def get_data(self,url,driver = '',header_add = {},retry = 3):
+        _cookie = ''
+        if driver != '':
+            _cookie = self.get_cookie(driver)
         header = {
             'Origin': 'https://etax.anhui.chinatax.gov.cn',
             # 'Host': 'etax.anhui.chinatax.gov.cn', 
@@ -155,9 +167,14 @@ class HTool(HTMLParser):
             'Cookie':_cookie
         }
 
-        r = requests.get(url, headers=header)
-        return r
-
+        header = dict(header,**header_add)
+        get_res = requests.get(url, headers=header)
+        if get_res.status_code != 200 and retry > 0:
+            retry -= 1
+            sleep(5 - retry)
+            print(get_res.text)
+            return self.get_data(url,driver,header_add,retry)
+        return get_res
 
     def formatVar(self,a,key):
         if a.get(key) == None:
@@ -261,7 +278,7 @@ class HTool(HTMLParser):
         day = int(now_time.day)
         any_day = datetime.date(year, month, day)
         
-        next_month = any_day.replace(day=28) + datetime.timedelta(days=4)  # this will never fail
+        next_month = any_day.replace(day=28) + datetime.timedelta(days=4)
         return next_month - datetime.timedelta(days=next_month.day)
 
     # 返回几个月第一个天和最后一天的日期时间
@@ -281,10 +298,27 @@ class HTool(HTMLParser):
         d = datetime.datetime.today()
         month = d.month
         year = d.year
-        for i in range(n):
+        for _ in range(n):
             if month == 1:
                 year -= 1
                 month = 12
             else:
                 month -= 1
         return datetime.date(year, month, 1).strftime('%Y-%m-01')
+
+    # """
+    # 获取下个月的1号的日期
+    # :return: 返回日期
+    # """
+    def get_1st_of_next_month(self):
+
+        today = datetime.datetime.today()
+        year = today.year
+        month = today.month
+        if month == 12:
+            month = 1
+            year += 1
+        else:
+            month += 1
+        res = datetime.datetime(year,month,1)+datetime.timedelta(days = 1)
+        return res

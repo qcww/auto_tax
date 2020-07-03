@@ -102,10 +102,30 @@ class Ep(ui.MainMenu):
         self.running_index = -1
 
     def add_kk_task( self, event ):
-        pass
+        self.auto_kk = bool(1-self.auto_kk)
+        self.kk_btn.SetValue(self.auto_kk)
+        if self.auto_kk == True:
+            self.kk_btn.SetLabel('正在扣款')
+        else:
+            self.kk_btn.SetLabel('扣款')
+
+    def add_auto_tax_task(self,event):
+        self.auto_tax = bool(1-self.auto_tax)
+        self.report_btn.SetValue(self.auto_tax)
+        if self.auto_tax == True:
+            self.report_btn.SetLabel('正在报税')
+        else:
+            self.report_btn.SetLabel('报税')
+
+    def add_agent_task(self,event):
+        self.auto_dkfp = bool(1-self.auto_dkfp)
+        self.agent_btn.SetValue(self.auto_dkfp)
+        if self.auto_dkfp == True:
+            self.agent_btn.SetLabel('获取代开')
+        else:
+            self.agent_btn.SetLabel('代开发票')
 
     def start(self):
-
         self.running_index = -1
         self.auto_kk = False
         self.auto_tax = False
@@ -232,16 +252,6 @@ class Ep(ui.MainMenu):
         else:
             self.tax_site.page_init()
             self.tax_site.driver_auto_action()
-                
-            # if '成功' in rt and '失败' not in rt:
-            #     if corpid in self.err_arr:
-            #         del self.err_arr[corpid]
-            # else:
-            #     self.err_arr[corpid] = corp_data
-            # self.status_bar['his_err_num'].set("待处理：%s" % len(self.err_arr))
-            # self.htool.set_config('scrap','err_list',json.dumps(self.err_arr))
-        # except :
-        #     print('发生了未知错误')
 
     # 添加任务
     def add_task(self,corp_list):
@@ -285,6 +295,8 @@ class Ep(ui.MainMenu):
         if len(kk_list['rows']) == 0:
             self.add_log('批量请求扣款数据为空，自动暂停')
             self.auto_kk = False
+            self.kk_btn.SetValue(self.auto_kk)
+            self.kk_btn.SetLabel('扣款')
 
         for re in kk_list['rows']:
             post = (re['corpid'],re['corpname'],re['credit_code'],re['tax_pwd_gs'],"","","7")
@@ -303,6 +315,8 @@ class Ep(ui.MainMenu):
         if len(tax_list['rows']) == 0:
             self.add_log('批量请求报税数据为空，自动暂停')
             self.auto_tax = False
+            self.report_btn.SetValue(self.auto_tax)
+            self.report_btn.SetLabel('报税')
 
         for re in tax_list['rows']:
             post = (re['corpid'],re['corpname'],re['credit_code'],re['tax_pwd_gs'],"","","9")
@@ -320,6 +334,8 @@ class Ep(ui.MainMenu):
         if len(tax_list['rows']) == 0:
             self.add_log('批量请求待上传代开具发票企业为空，自动暂停')
             self.auto_dkfp = False
+            self.agent_btn.SetValue(self.auto_dkfp)
+            self.agent_btn.SetLabel('代开发票')
 
         for re in tax_list['rows']:
             post = (re['corpid'],re['corpname'],re['credit_code'],re['tax_pwd_gs'],"","","10")
