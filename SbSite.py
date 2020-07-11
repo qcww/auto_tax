@@ -20,9 +20,9 @@ from bs4 import BeautifulSoup
 
 
 #安徽社保网站
-class Export:
+class SbExport:
 
-    def __init__(self):
+    def __init__(self,taxObj):
         base_dir = os.getcwd()
         sys.path.append(base_dir)
         self.htool = HTool()
@@ -30,20 +30,14 @@ class Export:
 
         self.login_url = config['link']['ah_sb_login_url']
         self.ah_sb_hd_url = config['link']['ah_sb_hd_url']
-
-    #打开浏览器
-    def open_browser(self):
-        chrome_options = Options()
-        self.driver = webdriver.Chrome()
-        self.driver.maximize_window()
+        self.taxObj = taxObj
+        self.driver = self.taxObj.driver
 
      #登录
-    def login(self):
-        driver = self.driver
-        driver.get(self.login_url)
-        self.credit_code = '343541'
-        self.pwd = 'jm123456'
-
+    def login(self,sb_account,sb_pwd):
+        self.sb_account = sb_account
+        self.sb_pwd = sb_pwd
+        self.driver.get(self.login_url)
         #跳过引导
         sleep(3)
         # 尝试登录6次
@@ -63,8 +57,8 @@ class Export:
         tax_code_input = driver.find_element_by_id("username")
         pwd_input = driver.find_element_by_id("password")
         verify_code = driver.find_element_by_xpath("//form[@id='form1']//input[@name='verify']")
-        tax_code_input.send_keys(self.credit_code)
-        pwd_input.send_keys(self.pwd)
+        tax_code_input.send_keys(self.sb_account)
+        pwd_input.send_keys(self.sb_pwd)
         parse_code = self.parse_action()
         verify_code.send_keys(parse_code)
         # print('解析结果',parse_code)
@@ -114,19 +108,17 @@ class Export:
     def get_sb_data(self):
         htool = HTool()
         period = time.strftime("%Y%m",time.localtime())
-        next_month = htool.get_1st_of_next_month()
-        next_period = next_month.strftime("%Y%m")
+        # next_month = htool.get_1st_of_next_month()
+        # next_period = next_month.strftime("%Y%m")
 
         post_data ={"qsrq00":period,"jzrq00":period,"aae140":"","aae078":"","pageIndex":"0","pageSize":"999"}
         sb_ret = htool.post_data(self.ah_sb_hd_url,post_data,self.driver)
+        yj_total = 0
         if sb_ret.status_code == 200:
             sb_json = json.loads(sb_ret.text)
-            sb_gl = {}
             for it in sb_json['data']:
-                if it['aae002'] != next_period:
-                    continue
-                if it['aae140'] not in sb_gl:
-                    sb_gl[it['aae140']] = float(it['aae022']) + float(it['aae020'])
-                else:
-                    sb_gl[it['aae140']] += float(it['aae022']) + float(it['aae020'])
-            print(sb_gl)
+                # print(it['aae002'],next_period)
+                # if it['aae002'] != next_period:
+                #     continue
+                yj_total += float(it['aae022']) + float(it['aae020'])
+        return int(yj_total)

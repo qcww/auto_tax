@@ -10,6 +10,7 @@ import ChToWod
 import xml.dom.minidom
 import time
 import regedit
+import math
 
 from time import sleep
 from selenium import webdriver
@@ -17,6 +18,7 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.chrome.options import Options
 from HTool import HTool
 from bs4 import BeautifulSoup
+from SbSite import SbExport
 
 #税务局网站
 class TaxSite:
@@ -70,6 +72,8 @@ class TaxSite:
         self.tax_export_data_url = config['link']['tax_export_data_url']
         # 批量更新扣款数据接口
         self.bundle_kk_status_url = config['link']['bundle_kk_status_url']
+        # 待上传税务报表客户
+        self.ready_sw_url = config['link']['ready_sw_url']
 
         # 需要获取代开具发票的企业
         self.agent_ready_url = config['link']['agent_ready_url']
@@ -151,7 +155,7 @@ class TaxSite:
             login_open = driver.find_element_by_id("login")#获取打开登录框的按钮
             login_open_click = Action.click(login_open)#点击
             login_open_click.perform()
-            sleep(3)
+            sleep(2)
 
             # driver.switch_to.frame("loginSrc")#切换到登录框iframe
             tax_code_input = driver.find_element_by_id("username")
@@ -169,7 +173,7 @@ class TaxSite:
             #点击登录
             login_btn_click = Action.click(login_btn)
             login_btn_click.perform()
-            sleep(5)
+            sleep(2)
             # 判断是否有密码错误的提示框出来 
             pass_err = driver.find_element_by_id("layui-layer1")
             if pass_err:
@@ -204,6 +208,10 @@ class TaxSite:
                 return self.login_action(login_times)
         except :
             pass
+        self.driver.execute_script("$_ajax({url: url_kqxx,success: function(c) {fuser['uuid']=c[0].DJXH;}});")
+        sleep(1)
+        self.fuser = self.driver.execute_script("return fuser;")
+        print('self.fuser',self.fuser)
         return True
 
 
@@ -265,6 +273,7 @@ class TaxSite:
             if a == '9':
                 self.insert_log('税务申报')
                 self.tax_sb()
+                self.social_insurance()
             if a == '10':
                 self.insert_log('获取代开具发票')
                 self.dkfp_search()
@@ -350,12 +359,13 @@ class TaxSite:
 
     def get_tax_detail(self):
         htool = HTool()
-        data = {'sbrqq': self.sbrqq, 'sbrqz': self.sbrqz}
+        data = {'sbrqq': self.sbrqq, 'sbrqz': self.sbrqz,'uuid':self.fuser['uuid']}
         ret_msg = '获取申报统计数据失败'
         try:
             sb_data = htool.post_data(self.tax_data_url,data,self.driver)
-            print('获取详情结果',sb_data.text)
-        except:
+            # print('获取详情结果',sb_data.text)
+        except Exception as e:
+            print(e)
             return ret_msg
 
         
@@ -363,11 +373,13 @@ class TaxSite:
             try:
                 # print('统计数据结果',sb_data.text)
                 tax_json = json.loads(sb_data.text)
-            except:
+            except Exception as e:
+                print(e)
                 self.insert_log(self.corpname+": 获取申报数据失败,解析统计数据页面出错")
                 return "获取申报数据失败,解析统计数据页面出错"
             
             rt = []
+            
             # 解析title的模板
             parse_common_temp = json.loads(self.template['common'])
             load_config = json.loads(self.template['template'])
@@ -375,9 +387,19 @@ class TaxSite:
                 # 解析统计数据，获取详情与解析模板
                 for d in tax_json['data']:
                     print(d['YZPZZL_DM'],d['YZPZZL_MC'])
+                    qmldse = 0
+                    if '一般纳税人适用' in d['YZPZZL_MC']:
+                        link = htool.open_cell(d)
+                        sb_data = htool.get_data(link,self.driver)
+                        # print(sb_data.text)
+                        qmld_match = re.search(r'"qmldse":"(\d{0,}\.?\d{0,})"',sb_data.text)
+                        if qmld_match:
+                            qmldse = qmld_match.group(0).replace('"qmldse":"','').replace('"','')
+                        else:
+                            qmldse = 0
                     # 匹配模板关键词找到解析模板
                     parse_match_temp = {}
-                    parse_common_data = {}
+                    parse_common_data = {"qmldse":qmldse}
                     for temp in load_config:
                         if self.check_keyword_in_temp(temp['keyword'],d['YZPZZL_MC']):
                             
@@ -421,6 +443,7 @@ class TaxSite:
             
 
                 ss_data = self.ss_gl(rt)
+                qmldse = 0
                 for ss_item in ss_data:
                     fill_date_arr = ss_item.split('-')
                     fill_date = "%s-%s-01" % (fill_date_arr[0],fill_date_arr[1])
@@ -428,8 +451,10 @@ class TaxSite:
                     stop_date_arr = ss_data[ss_item][0]['stop_date'].split('-')
                     period = "%s%s" % (stop_date_arr[0],stop_date_arr[1])
 
-                    res = htool.post_data(self.tax_update_url,{"corpid":self.corpid,'period':period,'fill_date':fill_date,"msg":"自动更新[所属期：%s - 已申报税收数据]完成" % period,"data":json.dumps(ss_data[ss_item])})
-                    # print('上传你结果',res.text)
+                    for i in ss_data[ss_item]:
+                        qmldse += float(i['qmldse'])
+                    res = htool.post_data(self.tax_update_url,{"corpid":self.corpid,'period':period,'qmldse':qmldse,'fill_date':fill_date,"msg":"自动更新[所属期：%s - 已申报税收数据]完成 期末留抵税额:%s" % (period,qmldse),"data":json.dumps(ss_data[ss_item])})
+                    print('申报结果',ss_data,res.text)
                     if res.status_code == 200:
                         res_text = json.loads(res.text)
                         if res_text['code'] != 0:
@@ -437,13 +462,14 @@ class TaxSite:
                             self.insert_log(res_text['text'])
                     else:
                         self.insert_log('上传税收数据时发生了一个错误')
-            except:
-                pass
+            except Exception as e:
+                print(e)
+                self.insert_log(ret_msg)
                 # pahtool.post_data(self.tax_update_url,{"corpid":self.corpid,'period':period,'fill_date':sbrqz,"msg":"解析上传[%s-%s]已申报数据失败" % (sbrqq,sbrqz),"data":'[]'})ss
             return ret_msg
         else:
             htool.post_data(self.tax_update_url,{"corpid":self.corpid,'period':period,'fill_date':self.sbrqz,"msg":"从税务局网站获取[%s-%s]已申报数据失败" % (self.sbrqq,self.sbrqz),"data":'[]'})
-        self.insert_log(self.corpname+":获取申报信息失败")
+        self.insert_log(ret_msg)
         
         return ret_msg
 
@@ -493,7 +519,7 @@ class TaxSite:
      # 解析单条申报数据
     def parseTax(self,data,template,parse_common_data):
         try:
-            print(data)
+            # print(data)
             json_data = json.loads(data)
         except:
             self.insert_log("解析json数据错误 %s" % data)
@@ -838,13 +864,12 @@ class TaxSite:
         # 税务扣款信息
         # print('扣除企业或个税税款')
         self.kk_item_num = 2
-        self.driver.get(self.tax_kk_page_url,self.driver)
+        self.driver.get(self.tax_kk_page_url)
         # print('打开扣款界面')
-        sleep(15)
-
+        sleep(5)
         self.taxObj.remove_task()
         tax_kk_ret = self.do_tax_kk_action(bank_num)
-        print('扣款上传结果',tax_kk_ret)
+        # print('扣款上传结果',tax_kk_ret)
         self.insert_log(tax_kk_ret['msg'])
         htool.post_data(self.tax_kk_sb_url,tax_kk_ret)
         # 如果税费扣款失败，直接退出
@@ -853,12 +878,11 @@ class TaxSite:
 
         # 社保扣款
         print('扣除社保税款')
-        self.driver.get(self.sb_kk_page_url,self.driver)
+        self.driver.get(self.sb_kk_page_url)
         sb_kk_ret = self.do_sb_kk_action(bank_num)
         htool.post_data(self.tax_kk_sb_url,sb_kk_ret)
         print("社保扣款提交结果",sb_kk_ret)
 
-        
         if self.kk_item_num == 0:
             jkrqq = time.strftime("%Y-%m-01",time.localtime())
             jkrqz = time.strftime("%Y-%m-%d",time.localtime())
@@ -877,6 +901,7 @@ class TaxSite:
         if kk_data.status_code == 200:
             kk_json = json.loads(kk_data.text)
             # print('社保扣款',kk_json)
+            print('社保信息',kk_json)
             kk_item_num = len(kk_json['data'])
         else:
             kk_post_data['msg'] = '扣款失败,获取社保费缴纳信息时发生错误'
@@ -1009,8 +1034,8 @@ class TaxSite:
         if kk_ret.status_code == 200:
             kk_json = json.loads(kk_ret.text)
             print('扣款结果',kk_json)
+            self.driver.execute_script("window.location.reload()")
             if kk_json['code'] == 200:
-                self.driver.execute_script("window.location.reload()")
                 # 扣款成功,继续扣款
                 kk_post_data['msg'] = kk_item_name+',扣款成功'
                 kk_post_data['kk_status'] = 1
@@ -1020,8 +1045,10 @@ class TaxSite:
                 self.do_tax_kk_action(bank_num)
             else:
                 # 多个账户时可以轮流扣款
+                # self.driver.execute_script("layer.closeAll();")
                 if bank_num > 1:
                     bank_num -= 1
+                    print('扣除其它账户',kk_json)
                     return self.do_tax_kk_action(bank_num)
                 else:
                     err_msg = '扣款失败，['+kk_item_name+'] '+kk_json['error']['errorMsgs'][0]
@@ -1031,25 +1058,27 @@ class TaxSite:
             err_msg = kk_item_name+',提交扣款信息失败'
             self.insert_log(err_msg)
             kk_post_data['msg'] = err_msg
+        print('客户端返回的扣款结果',kk_post_data)    
         return kk_post_data
 
     # 重新更新缴款信息
     def update_kk_info(self,jkrqq = '',jkrqz = ''):
+        htool = HTool()
         if jkrqq == '':
             jkrqq = self.sbrqq
         if jkrqz == '':
             jkrqz = self.sbrqz
 
-        data = {'jkrqq': jkrqq,'jkrqz': jkrqz,'ssqq': '','ssqz':'','uuid':''}
+        data = {'jkrqq': jkrqq,'jkrqz': jkrqz,'ssqq': '','ssqz':'','uuid':self.fuser['uuid']}
         ret_msg = '获取申报统计数据失败'
         self.insert_log('更新扣款状态%s - %s' % (jkrqq,jkrqz))
         try:
             kk_data = htool.post_data(self.kk_update_url,data,self.driver)
-        except:
+        except Exception as e:
             # 这里需要重新添加任务
-            print(ret_msg)
+            print('重新更新结果时发生错误',e)
             return ret_msg
-
+        print('扣款税务端返回汇总结果',kk_data.text)
         if kk_data and kk_data.status_code == 200:
             post_data = {}
             # 通用代码，执行到此步，默认通用项目已经扣除
@@ -1091,10 +1120,10 @@ class TaxSite:
                         ret_msg += err
                     self.insert_log(err)    
                 return ret_msg
-            except:
+            except Exception as e:
                 ret_msg = '获取待扣款数据失败，请检查'
-                print(ret_msg)
-                self.taxObj.remove_task()
+                print(e)
+                # self.taxObj.remove_task()
                 return ret_msg
 
     # 税收数据归类
@@ -1122,7 +1151,7 @@ class TaxSite:
     # 获取未扣款数据
     def get_kk_data(self):
         htool = HTool()
-        post_res = htool.get_data('',self.tax_kk_info_url,{},3)
+        post_res = htool.get_data(self.tax_kk_info_url)
         if post_res.status_code == 200:
             return json.loads(post_res.text)
         else:
@@ -1154,7 +1183,7 @@ class TaxSite:
 
     def dkfp_detail(self,pageNum):
         # 发票申请
-        data = {'pageSize': '20','pageNum': pageNum,'formType':'A02'}
+        data = {'pageSize': '200','pageNum': pageNum,'formType':'A02'}
         # ret_msg = '获取代开发票申请数据失败'
         htool = HTool()
         # try:
@@ -1162,11 +1191,11 @@ class TaxSite:
         if dkfp_data.status_code == 200:
             dkfp_json = json.loads(dkfp_data.text)
             # print(dkfp_json)
-            if int(dkfp_json['data']['total']) > 0 and len(dkfp_json['data']['rows']) > 0:
+            if float(dkfp_json['data']['total']) > 0 and len(dkfp_json['data']['rows']) > 0:
                 ret_json = []
                 for dk in dkfp_json['data']['rows']:
                     app_time_arr = dk['createtime'].split('-')
-                    if int(app_time_arr[0]) < 2020:
+                    if float(app_time_arr[0]) < 2020:
                         continue
                     # 只获取状态为已办理的数据
                     if dk['stacode'] != '13':
@@ -1217,15 +1246,18 @@ class TaxSite:
         tax_info = htool.get_data(self.tax_info_url,self.driver)
         sbrqq = time.strftime("%Y-%m-01",time.localtime())
         sbrqz = time.strftime("%Y-%m-%d",time.localtime())
-        data = {'sbrqq': sbrqq,'sbrqz': sbrqz,'zsxmDm': ''}
+
+        data = {'sbrqq': sbrqq,'sbrqz': sbrqz,'zsxmDm': '','uuid':self.fuser['uuid']}
+        
         ret_msg = '获取申报统计数据失败'
         try:
             sb_data = htool.post_data(self.tax_data_url,data,self.driver)
-        except:
-            print(ret_msg)
+        except Exception as e:
+            print(e)
             return sb_status,tax_dict
 
         htool = HTool()
+        # print('获取已申报数据',sb_data.text)
 
         if sb_data and sb_data.status_code == 200:
             try:
@@ -1291,7 +1323,7 @@ class TaxSite:
     # 获取未报税数据
     def get_tax_data(self):
         htool = HTool()
-        post_res = htool.get_data('',self.tax_report_info_url,{},3)
+        post_res = htool.get_data(self.tax_report_info_url)
         if post_res.status_code == 200:
             return json.loads(post_res.text)
         else:
@@ -1300,11 +1332,70 @@ class TaxSite:
     # 获取未上传代开具发票企业
     def get_dkjfp_data(self):
         htool = HTool()
-        post_res = htool.get_data('',self.agent_ready_url,{},3)
+        post_res = htool.get_data(self.agent_ready_url)
         if post_res.status_code == 200:
             return json.loads(post_res.text)
         else:
             return {}
+
+    # 获取需要上传报税数据企业
+    def get_sw_sb_data(self):
+        htool = HTool()
+        post_res = htool.get_data(self.ready_sw_url)
+        if post_res.status_code == 200:
+            return json.loads(post_res.text)
+        else:
+            return {}
+
+    # 社保申报
+    def social_insurance(self):
+        self.taxObj.remove_task()
+        htool = HTool()
+        ssqz = htool.last_day_of_month()
+        si_url = self.tax_config_info['ah_sb_url_pre'] + 'nsrsbh=%s&bddm=SBFSB01&uuid=&ssqq=%s&ssqz=%s' % (self.credit_code,time.strftime("%Y-%m-01",time.localtime()),ssqz)
+        self.driver.get(si_url)
+        sb_jn_ret = htool.driver_close_alert(self.driver,3)    
+        # 判断有无社保或需不需要缴纳
+        if len(sb_jn_ret) > 0:
+            # 无需申报无需申报
+            if '您尚未进行社保登记' in sb_jn_ret[-1]:
+                print(sb_jn_ret)
+                return False
+            # 可能已经申报过 
+            elif '没有查询到人社部门的核定信息' in sb_jn_ret[-1]:
+                return True
+
+        sb_account = 499096
+        sb_pwd = 499096
+        # 登录社保网站核定金额
+        sb_site = SbExport(self)
+        login_ret = sb_site.login(sb_account,sb_pwd)
+        if login_ret == False:
+            print('登录失败')
+        # 通过社保局核定的金额 
+        hd_je = sb_site.get_sb_data()
+        print('核定社保金额',hd_je)
+        self.driver.get(si_url)
+        self.driver.execute_script("$('.sbt .sbt-checkbox').click();")
+        self.iframe = self.driver.find_element_by_xpath('//iframe[@id = "childIframe"]')
+        self.driver.switch_to.frame(self.iframe)
+
+        # 金额对比
+        hd_sb_data = self.driver.execute_script("return $('#sbfjs').table('getData');")
+        print('税务核定数据',hd_sb_data)
+        yjfe = 0
+        for mx_item in hd_sb_data:
+            yjfe += float(mx_item['yjfe'])
+        if int(yjfe) != hd_je:
+            print('缴费金额不一致，请核对')
+            return False
+        self.driver.execute_script("$('#sbfjs .sbt-checkbox-all').click();")
+
+        print('社保检验')
+        # self.driver.switch_to.default_content()
+        self.driver.execute_script("shenbao();")
+        fjs_ret = htool.driver_close_alert(self.driver,3)    
+        print(fjs_ret[-1]) 
 
     # 报税
     def tax_sb(self):
@@ -1314,7 +1405,8 @@ class TaxSite:
         # 核定失败了
         if hd_ret == False:
             return False
-        print('核定申报',self.ready_tax)    
+        print('核定申报',self.ready_tax)
+        
         # try:
         # 印花税按次申报，全部零申报(需要先查询下税费核定)
         # self.yhs_ac_sb()
@@ -1363,6 +1455,81 @@ class TaxSite:
                     htool.driver_close_alert(self.driver)
                     # sleep(15)
             self.driver.execute_script("shenbao();")
+        # 企业所得税(暂未区分A类或B类)
+        elif bddm == 'SDSYJB93':
+            self.insert_log('企业所得税申报')
+            self.driver.get(tax_url)
+            htool.driver_close_alert(self.driver,3)
+            # $('#page-tree').children('option').length
+            # 本年收入累计
+            yycb = 8000
+
+
+            # 填写附表部分
+            option_num = self.driver.execute_script("return $('#page-tree').children('option').length;")
+            for i in range(int(option_num)-1):
+                # print(i+1)
+                self.driver.execute_script("$(\"#page-tree option\").eq(%s).attr(\"selected\",true).trigger('change');" % (i+1))
+                fname = self.driver.execute_script("return $(\"#page-tree option\").eq(%s).attr(\"name\");" % (i+1))
+                self.driver.switch_to.default_content()
+    
+                # A203010居民企业参股外国企业信息报告表跳过
+                if fname != 'A203010':
+                    self.iframe = self.driver.find_element_by_xpath('//div[@id="iframes"]/iframe[@name = "%s"]' % fname)
+                    self.driver.switch_to.frame(self.iframe)
+                    self.driver.execute_script("$('#warp .sbt-btnList button').click();")
+                    self.driver.switch_to.default_content()
+                sleep(3)
+            # 填写主表部分
+            self.driver.switch_to.default_content()
+            self.driver.execute_script("$(\"#page-tree option\").attr(\"selected\",false).trigger('change');")
+            main_name = self.driver.execute_script("return $(\"#page-tree option\").eq(0).attr(\"name\");")
+            self.iframe = self.driver.find_element_by_xpath('//div[@id="iframes"]/iframe[@name = "%s"]' % main_name)
+            self.driver.switch_to.frame(self.iframe)
+            # 实际已缴纳所得税额
+            
+            # 13行实际已缴纳所得税额
+            yjsdse = self.driver.execute_script("return $('#sbbxxForm input[name=sjyyjsdseLj]').val();")
+            # 14行 特定业务预缴（征）所得税额
+            tdywyjzsdseLj = self.driver.execute_script("return $('#sbbxxForm input[name=tdywyjzsdseLj]').val();")
+            # 15行 符合条件的小型微利企业延缓缴纳所得税额
+            fhtjxwqyyhjzsdseLj = self.driver.execute_script("return $('#sbbxxForm input[name=fhtjxwqyyhjzsdseLj]').val();")
+
+            #1 营业收入
+            self.driver.execute_script("$('#sbbxxForm input[name=yysrLj]').val(%s).trigger('change');" % yycb)
+
+            #3 利润总额
+            lr_lj = float(yjsdse.replace(',','')) + float(tdywyjzsdseLj.replace(',','')) + float(fhtjxwqyyhjzsdseLj.replace(',',''))
+            if lr_lj > 250000:
+                lr_total = lr_lj/0.25
+            elif lr_lj > 50000:
+                lr_total = (lr_lj - 50000)/0.1 + 50000/0.05
+            else:
+                lr_total = lr_lj/0.05
+            self.driver.execute_script("$('#sbbxxForm input[name=lrzeLj]').val(%s).trigger('change');" % round(lr_total,2))
+
+            #2 营业成本
+            self.driver.execute_script("$('#sbbxxForm input[name=yycbLj]').val(%s).trigger('change');" % round(float(yycb) - lr_total))
+            # 是否高新技术企业 科技型中小企业 技术入股递延纳税事项
+            self.driver.execute_script("$('input[name=sfgxjsqy][value=\"N\"]').prop('checked',true);$('input[name=sfkjxzxqy][value=\"N\"]').prop('checked',true);$('input[name=sffsjsrgdynssx][value=\"N\"]').prop('checked',true);")
+            # 从业人数
+            mm = time.strftime("%m")
+            jc_rs = jm_rs = jc_ze = jm_ze = 1
+            lart_j = 0
+            if int(mm) > 6:
+                lart_j = math.ceil((int(mm)-1)/3) - 1
+                jc_rs = self.driver.execute_script("return $('#seasonForm input[name=qccyrs%s]').val();" % lart_j)
+                jm_rs = self.driver.execute_script("return $('#seasonForm input[name=qmcyrs%s]').val();" % lart_j)
+                jc_ze = self.driver.execute_script("return $('#seasonForm input[name=qczcze%s]').val();" % lart_j)
+                jm_ze = self.driver.execute_script("return $('#seasonForm input[name=qmzcze%s]').val();" % lart_j)
+
+            now_j = lart_j + 1
+            self.driver.execute_script("$('#seasonForm input[name=qccyrs%s]').val(%s);" % (now_j,jc_rs))
+            self.driver.execute_script("$('#seasonForm input[name=qmcyrs%s]').val(%s);" % (now_j,jm_rs))
+            self.driver.execute_script("$('#seasonForm input[name=qczcze%s]').val(%s);" % (now_j,jc_ze))
+            self.driver.execute_script("$('#seasonForm input[name=qmzcze%s]').val(%s);" % (now_j,jm_ze))
+            self.driver.switch_to.default_content()
+            self.driver.execute_script("shenbao();")
 
         # 附加税
         elif bddm == 'FJSF001':
@@ -1395,12 +1562,29 @@ class TaxSite:
                 htool.driver_close_alert(self.driver,3)
                 parse_sb_data = self.driver.execute_script("return $('#mxTable').table('getData');")
 
-                pmdm = "101110104"
+                pmdm = ""
+                sr_total = 1571539.54
+                # 是否能匹配上
+                pm_match = False
+                # 其它匹配项
+                retry_index = 0
                 p_index = 0
                 for sb_item in parse_sb_data:
                     if sb_item['zspmDm'] == pmdm:
-                        self.driver.execute_script("$('.sbt input[name=jsje]').eq(%s).val(20000).trigger('change');" % p_index)
+                        pm_match = True
+                        # 报税所需数据
+                        sb_data = self.get_tax_sb_data(tax_info)
+                        if len(sb_data) == 0:
+                            print('无报税数据')
+                            return False
+                        self.driver.execute_script("$('.sbt input[name=jsje]').eq(%s).val(%s).trigger('change');" % (p_index,sr_total))
+                    # 选择不是资金账簿的作为备选 
+                    elif sb_item['zspmDm'] != "101110501":
+                        retry_index = p_index
                     p_index += 1
+                # 如果未匹配上选择其它匹配项
+                if pm_match == False:
+                    self.driver.execute_script("$('.sbt input[name=jsje]').eq(%s).val(%s).trigger('change');" % (retry_index,sr_total))
             self.driver.execute_script("shenbao();")  
 
         # 一般纳税人增值税 
@@ -1412,7 +1596,18 @@ class TaxSite:
             # self.driver.execute_script("$(\"#page-tree\").find(\"option[name='Z01']\").attr(\"selected\",true).trigger('change');")
             # htool.driver_close_alert(self.driver,3)
             # sleep(3)
+            # 报税所需数据
+            sb_data = self.get_tax_sb_data(tax_info)
+            if len(sb_data) == 0:
+                print('无报税数据')
+                return False
+            # 测试数据
+            # sb_data['sr_sk_z'] = sb_data['sr_13_lw_z'] = '16460.17'
+            # sb_data['tax_13_lw_z'] = '2139.83'
+            # # 进项税额
+            # sb_data['jx_se'] = '8681.25'
 
+            sleep(1)
             # 填写附表2
             self.driver.execute_script("$(\"#page-tree\").find(\"option[name='Z02']\").attr(\"selected\",true).trigger('change');")
             msg_dic = htool.driver_close_alert(self.driver,3)
@@ -1428,109 +1623,166 @@ class TaxSite:
 
             # 8b火车票机票等
             print('8b火车票机票等')
-            self.driver.execute_script("$('#bqjxsemxbForm input[name=fs_8]').val(1).trigger('change');")
-            self.driver.execute_script("$('#bqjxsemxbForm input[name=je_8]').val(200).trigger('change');")
-            self.driver.execute_script("$('#bqjxsemxbForm input[name=se_8]').val(20).trigger('change');")
-            sleep(1)
+            if float(sb_data['hcp_fjp_number']) > 0 and float(sb_data['hcp_fjp_net_income']) > 0:
+                self.driver.execute_script("$('#bqjxsemxbForm input[name=fs_8]').val(%s).trigger('change');" % sb_data['hcp_fjp_number'])
+                self.driver.execute_script("$('#bqjxsemxbForm input[name=je_8]').val(%s).trigger('change');" % sb_data['hcp_fjp_net_income'])
+                self.driver.execute_script("$('#bqjxsemxbForm input[name=se_8]').val(%s).trigger('change');" % sb_data['hcp_fjp_tax_amount'])
 
-            # 本期用于抵扣的旅客运输服务扣税凭证
-            print('本期用于抵扣的旅客运输服务扣税凭证')
-            self.driver.execute_script("$('#bqjxsemxbForm input[name=fs_8]').val(1).trigger('change');")
-            self.driver.execute_script("$('#bqjxsemxbForm input[name=je_8]').val(200).trigger('change');")
-            self.driver.execute_script("$('#bqjxsemxbForm input[name=se_8]').val(20).trigger('change');")
+                # 本期用于抵扣的旅客运输服务扣税凭证
+                print('本期用于抵扣的旅客运输服务扣税凭证')
+                self.driver.execute_script("$('#bqjxsemxbForm input[name=fs_8]').val(%s).trigger('change');" % sb_data['hcp_fjp_number'])
+                self.driver.execute_script("$('#bqjxsemxbForm input[name=je_8]').val(%s).trigger('change');" % sb_data['hcp_fjp_net_income'])
+                self.driver.execute_script("$('#bqjxsemxbForm input[name=se_8]').val(%s).trigger('change');" % sb_data['hcp_fjp_tax_amount'])
 
             # 红字专用发票信息表注明的进项税额
-            self.driver.execute_script("$('#bqjxsemxbForm input[name=se_20]').val(0).trigger('change');")
+            if float(sb_data['red_rush_tax']) > 0:
+                self.driver.execute_script("$('#bqjxsemxbForm input[name=se_20]').val(0).trigger('change');")
             self.driver.execute_script("getZ02Data();")
-            self.driver.switch_to.default_content()
+
             sleep(1)
-
-
             # 填写附表4
+            self.driver.switch_to.default_content()
             self.driver.execute_script("$(\"#page-tree\").find(\"option[name='Z04']\").attr(\"selected\",true).trigger('change');")
             htool.driver_close_alert(self.driver,3)
             self.iframe = self.driver.find_element_by_xpath('//div[@id="iframes"]/iframe[@name = "Z04"]')
             self.driver.switch_to.frame(self.iframe)
             # 增值税税控系统专用设备费及技术维护费
-            self.driver.execute_script("$('#sedjqkbForm input[name=bqfse_zzsskxtfy_2]').val(0).trigger('change');")
-            self.driver.execute_script("$('#sedjqkbForm input[name=bqsjdjse_zzsskxtfy_4]').val(0).trigger('change');")
+            if float(sb_data['skp_or_fwf_total']) > 0:
+                self.driver.execute_script("$('#sedjqkbForm input[name=bqfse_zzsskxtfy_2]').val(%s).trigger('change');" % sb_data['skp_or_fwf_total'])
+                # self.driver.execute_script("$('#sedjqkbForm input[name=bqsjdjse_zzsskxtfy_4]').val(%s).trigger('change');" % sb_data['skp_or_fwf_total'])
             # 外地预缴
             self.driver.execute_script("$('#sedjqkbForm input[name=bqfse_jzfwyzjnsk_2]').val(0).trigger('change');")
             self.driver.execute_script("$('#sedjqkbForm input[name=bqsjdjse_jzfwyzjnsk_4]').val(0).trigger('change');")
             self.driver.execute_script("getZ04Data();")
-            self.driver.switch_to.default_content()
+
             sleep(1)
-
-
             # 填写增值税减免申报明细表
+            self.driver.switch_to.default_content()
             self.driver.execute_script("$(\"#page-tree\").find(\"option[name='Z05']\").attr(\"selected\",true).trigger('change');")
             htool.driver_close_alert(self.driver,3)
             self.iframe = self.driver.find_element_by_xpath('//div[@id="iframes"]/iframe[@name = "Z05"]')
             self.driver.switch_to.frame(self.iframe)
-            
-            # 无税控盘抵扣优惠情况注释一下代码
-            # self.driver.execute_script("$('#zzsjmssbmxbjsxmGrid .sbt-table-add').click();")
-            # sleep(1)
-            # 选择框可能报错，需要屏蔽
-            # try:
-            #     self.driver.execute_script("$('.sbt select[name=hmc]').find(\"option:contains('0001129917|SXA031900185')\").attr(\"selected\",true).trigger('change');")
-            # except:
-            #     pass  
-            # self.driver.execute_script("$('.sbt input[name=bqfse]').val(200).trigger('change');")
-            # self.driver.execute_script("$('.sbt input[name=bqsjdjse]').val(200).trigger('change');")
+            # 税控盘抵扣优惠情况
+            if float(sb_data['skp_or_fwf_total']) > 0:
+                self.driver.execute_script("$('#zzsjmssbmxbjsxmGrid .sbt-table-add').click();")
+                sleep(1)
+                # trigger可能报错，需要屏蔽
+                try:
+                    self.driver.execute_script("$('.sbt select[name=hmc]').find(\"option:contains('0001129917|SXA031900185')\").attr(\"selected\",true).trigger('change');")
+                except:
+                    pass  
+                self.driver.execute_script("$('.sbt input[name=bqfse]').val(%s).trigger('change');" % sb_data['skp_or_fwf_total'])
+                # self.driver.execute_script("$('.sbt input[name=bqsjdjse]').val(200).trigger('change');")
             self.driver.execute_script("getZ05Data();")
             self.driver.switch_to.default_content()
             # 免税收入暂时无法完成 pass
 
+            sleep(1)
             # 填写附表1
             self.driver.execute_script("$(\"#page-tree\").find(\"option[name='Z01']\").attr(\"selected\",true).trigger('change');")
             htool.driver_close_alert(self.driver,3)
             self.iframe = self.driver.find_element_by_xpath('//div[@id="iframes"]/iframe[@name = "Z01"]')
             self.driver.switch_to.frame(self.iframe)
 
-            tax_data = {"13_2":[0,0,0,0,0,0],"13_1":[0,0,0,0,0,0],"9_2":[0,0,0,0,0,0],"9_1":[0,0,0,0,0,0]}
-            for i in range(6):
-                self.driver.execute_script("$('#bqxsqkmxbForm input[name=kjskzzszyfp_xse_1_%s]').val(%s).trigger('change');" % (i,tax_data['13_2'][i]))
-                self.driver.execute_script("$('#bqxsqkmxbForm input[name=kjskzzszyfp_xxynse_2_%s]').val(%s).trigger('change');" % (i,tax_data['13_1'][i]))
-                self.driver.execute_script("$('#bqxsqkmxbForm input[name=kjqtfp_xse_3_%s]').val(%s).trigger('change');" % (i,tax_data['9_2'][i]))
-                self.driver.execute_script("$('#bqxsqkmxbForm input[name=kjqtfp_xxynse_4_%s]').val(%s).trigger('change');" % (i,tax_data['9_1'][i]))
-                
+            tax_data = {"1":htool.to_match_f1(sb_data,'_lw','13'),"2":htool.to_match_f1(sb_data,'_fw','13'),"3":htool.to_match_f1(sb_data,'_lw','9'),"4":htool.to_match_f1(sb_data,'_fw','9'),"5":htool.to_match_f1(sb_data,'','6'),"11":htool.to_match_f1(sb_data,'_lw','3'),"12":htool.to_match_f1(sb_data,'_fw','3'),}
+
+            for i in tax_data:
+                z_x = self.driver.execute_script("return $('#bqxsqkmxbForm input[name=kjskzzszyfp_xse_1_%s]').val();" % i)
+                z_e = self.driver.execute_script("return $('#bqxsqkmxbForm input[name=kjskzzszyfp_xxynse_2_%s]').val();" % i)
+                p_x = self.driver.execute_script("return $('#bqxsqkmxbForm input[name=kjqtfp_xse_3_%s]').val();" % i)
+                p_e = self.driver.execute_script("return $('#bqxsqkmxbForm input[name=kjqtfp_xxynse_4_%s]').val();" % i)
+
+                if htool.match_fl_val(tax_data[i][0],z_x) == False or htool.match_fl_val(tax_data[i][1],z_e) == False or htool.match_fl_val(tax_data[i][2],p_x) == False or htool.match_fl_val(tax_data[i][3],p_e) == False:
+                    # 数据匹配检验不对
+                    print(i,tax_data[i][0],z_x,tax_data[i][1],z_e,tax_data[i][2],p_x,tax_data[i][3],p_e)
+                    print('填写附表1时，数据不匹配，请人工检查后重新申报')
+                    return False
             self.driver.execute_script("getZ01Data();")
             self.driver.switch_to.default_content()
             # sleep(250)
             # self.driver.execute_script("$('#bqxsqkmxbForm input[name=bqsjdjse]').val(200).trigger('change');")
 
-            sleep(2)
+            sleep(1)
             # 主表填写
             self.iframe = self.driver.find_element_by_xpath('//div[@id="iframes"]/iframe[@name = "Z00"]')
             self.driver.switch_to.frame(self.iframe)
             # 进项税额转出(红冲发票税额)
-            self.driver.execute_script("$('#sbbxxForm input[name=ybhwjlw_bys_14]').val(0).trigger('change');")
-            # 应纳税额减征额(税控盘与服务实际抵扣额)
-            self.driver.execute_script("$('#sbbxxForm input[name=ybhwjlw_bys_23]').val(0).trigger('change');")
+            if float(sb_data['red_rush_tax']) > 0:
+                self.driver.execute_script("$('#sbbxxForm input[name=ybhwjlw_bys_14]').val(%s).trigger('change');" % sb_data['red_rush_tax'])
             # # ①分次预缴税额	(外地预缴实际抵减)
             self.driver.execute_script("$('#sbbxxForm input[name=ybhwjlw_bys_28]').val(0).trigger('change');")
+            # 应纳税额减征额(税控盘与服务实际抵扣额)
+            if float(sb_data['skp_or_fwf_total']) > 0:
+                self.driver.execute_script("$('#sbbxxForm input[name=ybhwjlw_bys_23]').val(%s).trigger('change');" % sb_data['skp_or_fwf_total'])
+
+            # 14行，进项税额
+            if float(sb_data['jx_se']) > 0:
+                self.driver.execute_script("$('#sbbxxForm input[name=ybhwjlw_bys_12]').val(%s).trigger('change');" % sb_data['jx_se'])
+
+            rt_hj_1 = self.driver.execute_script("return $('#sbbxxForm input[name=ybhwjlw_bys_24]').val();")
+            rt_hj_2 = self.driver.execute_script("return $('#sbbxxForm input[name=ybhwjlw_bnlj_24]').val();")
+            yn_hj = float(rt_hj_1.replace(',','')) + float(rt_hj_2.replace(',',''))
+            print('应纳税额合计',yn_hj)
             self.driver.switch_to.default_content()
-            sleep(2)
+            sleep(1)
 
             # 填写附表3
-            self.driver.execute_script("$(\"#page-tree\").find(\"option[name='Z03']\").attr(\"selected\",true).trigger('change');")
-            htool.driver_close_alert(self.driver,3)
-            self.iframe = self.driver.find_element_by_xpath('//div[@id="iframes"]/iframe[@name = "Z03"]')
-            self.driver.switch_to.frame(self.iframe)
-            self.driver.execute_script("$('#ysfwkcxmmxForm input[name=bqysfwjghjemsxse_1_6]').val(0).trigger('change');")
-            self.driver.execute_script("getZ03Data();")
-            # 导出
-            self.driver.switch_to.default_content()
-
+            # 填写6%价税合计
+            ys_fw_kc = float(sb_data['sr_6_z']) + float(sb_data['tax_6_z']) + float(sb_data['sr_6_p']) + float(sb_data['tax_6_p'])
+            if ys_fw_kc > 0:
+                self.driver.execute_script("$(\"#page-tree\").find(\"option[name='Z03']\").attr(\"selected\",true).trigger('change');")
+                htool.driver_close_alert(self.driver,3)
+                self.iframe = self.driver.find_element_by_xpath('//div[@id="iframes"]/iframe[@name = "Z03"]')
+                self.driver.switch_to.frame(self.iframe)
+                self.driver.execute_script("$('#ysfwkcxmmxForm input[name=bqysfwjghjemsxse_1_6]').val(%s).trigger('change');" % ys_fw_kc)
+                self.driver.execute_script("getZ03Data();")
+                sleep(1)
+                self.driver.switch_to.default_content()
             self.driver.execute_script("shenbao();")
-            # 继续申报增值税
+            sb_ret =  htool.driver_close_alert(self.driver,4)
+            print('一般纳税人增值税报税结果',sb_ret[-1])
+            
+            # 附加税申报
+            fjs_url = tax_url.replace('SB00112','FJSF001')
+            self.driver.get(fjs_url)
+            htool.driver_close_alert(self.driver,4)
+            self.driver.execute_script("layer.closeAll();")
+            self.iframe = self.driver.find_element_by_xpath('//div[@id="iframes"]/iframe[@name = "main"]')
+            self.driver.switch_to.frame(self.iframe)
+            # 应纳税额大于0的情况下，才需要填表
+            if yn_hj > 0:
+                self.driver.execute_script("$('#mxTable input[name=ybzzs]').val(%s).trigger('change');" % yn_hj)
+                # 后面替换成后台传递的数值
+                cj_yj = 0
+                jy_yj = 0
+                df_yj = 0
+
+                fs_data = self.driver.execute_script("return $('#mxTable').table('getData');")
+                it_st = 0
+                for fs_it in fs_data:
+                    # 地方教育附加
+                    if fs_it['zspmDm'] == '101090101':
+                        if cj_yj > 0:
+                            self.driver.execute_script("$('#mxTable input[name=bqyjse]').eq(%s).val(%s).trigger('change');" % (it_st,round(cj_yj,2)))
+                    # 城市维护建设税 
+                    elif fs_it['zspmDm'] == '302030100':
+                        if jy_yj > 0:
+                            self.driver.execute_script("$('#mxTable input[name=bqyjse]').eq(%s).val(%s).trigger('change');" % (it_st,round(jy_yj,2)))
+                    # 教育费附加        
+                    elif fs_it['zspmDm'] == '302160100':
+                        if df_yj > 0:
+                            self.driver.execute_script("$('#mxTable input[name=bqyjse]').eq(%s).val(%s).trigger('change');" % (it_st,round(df_yj,2)))
+
+                    it_st += 1
+            self.driver.switch_to.default_content()
+            self.driver.execute_script("shenbao();") 
+
         # 小规模增值税
         elif bddm == 'SB00212':
             # 代开发票数据
             dk_data = self.dkfp_bs_search(tax_info['ssqq'],tax_info['ssqz'])
             # 报税所需数据
-            sb_data = self.get_value_add_data(tax_info)
+            sb_data = self.get_tax_sb_data(tax_info)
             if len(sb_data) == 0:
                 print('无报税数据')
                 return False
@@ -1543,77 +1795,121 @@ class TaxSite:
             self.driver.switch_to.frame(self.iframe)
 
             # 测试数据
-            sb_data['sr_sk_z'] = sb_data['sr_3_fw_z'] = 411844.66
+            # sb_data['sr_sk_z'] = 1571539.54
+            # sb_data['sr_3_fw_z'] = 1373519.74
+            # sb_data['sr_1_fw_z'] = 198019.8
+
+            # sb_data['skp_or_fwf_total'] = 200
+            # sb_data['sr_1_lw_z'] = 80000
+            # sb_data['sr_sk_p'] = sb_data['sr_1_fw_p'] = 97245.55
+            # sb_data['skp_or_fwf_total'] = 200
             # 收入合计
             total_money = float(sb_data['sr_sk_p']) + float(sb_data['sr_dk']) + float(sb_data['sr_drxnw']) + float(sb_data['sr_tyjd']) + float(sb_data['sr_sk_z']) + float(sb_data['sr_wkp']) + float(sb_data['sr_xnw']) + float(sb_data['sr_qt']) - float(sb_data['red_rush_tax'])
-            yn_hj = '0'
+            bqybt = 0
+
+            lw_z_total = float(sb_data['sr_3_lw_z']) + float(sb_data['sr_1_lw_z'])
+            lw_p_total = float(sb_data['sr_3_lw_p']) + float(sb_data['sr_1_lw_p'])
+            fw_z_total = float(sb_data['sr_3_fw_z']) + float(sb_data['sr_1_fw_z'])
+            fw_p_total =  float(sb_data['sr_3_fw_p']) + float(sb_data['sr_1_fw_p'])
+
+            self.driver.execute_script("$('#sbbxxForm input[name=swjgdkdzzszyfpbhsxse_2_1]').val(%s).trigger('change');" % lw_z_total)
+            self.driver.execute_script("$('#sbbxxForm input[name=swjgdkdzzszyfpbhsxse_2_2]').val(%s).trigger('change');" % fw_z_total)
+            # 判断有没有开一个点的
+            jm_item = float(sb_data['sr_1_lw_z']) + float(sb_data['sr_1_lw_p']) + float(sb_data['sr_1_fw_z']) + float(sb_data['sr_1_fw_p'])
             # 月收入超10w,季收入超30w
             if (total_money/ss_period) > 100000:
                 # 货物及劳务
-                lw_z_total = float(sb_data['sr_3_lw_z']) + float(sb_data['sr_1_lw_z'])
-                lw_p_total = float(sb_data['sr_3_lw_p']) + float(sb_data['sr_1_lw_p'])
-                fw_z_total = float(sb_data['sr_3_fw_z']) + float(sb_data['sr_1_fw_z'])
-                fw_p_total =  float(sb_data['sr_3_fw_p']) + float(sb_data['sr_1_fw_p'])
                 lw_total = lw_z_total + lw_p_total
                 fw_total = fw_z_total + fw_p_total
                 self.driver.execute_script("$('#sbbxxForm input[name=yzzzsbhsxse_1_1]').val(%s).trigger('change');" % lw_total)
                 self.driver.execute_script("$('#sbbxxForm input[name=yzzzsbhsxse_1_2]').val(%s).trigger('change');" % fw_total)
-
-                self.driver.execute_script("$('#sbbxxForm input[name=swjgdkdzzszyfpbhsxse_2_1]').val(%s).trigger('change');" % lw_z_total)
-                self.driver.execute_script("$('#sbbxxForm input[name=swjgdkdzzszyfpbhsxse_2_2]').val(%s).trigger('change');" % fw_z_total)
-
                 self.driver.execute_script("$('#sbbxxForm input[name=skqjkjdptfpbhsxse_3_1]').val(%s).trigger('change');" % lw_p_total)
                 self.driver.execute_script("$('#sbbxxForm input[name=skqjkjdptfpbhsxse_3_2]').val(%s).trigger('change');" % fw_p_total)
-                # 判断有没有开一个点的，有的话填附表
-                jm_item = float(sb_data['sr_1_lw_z']) + float(sb_data['sr_1_lw_p']) + float(sb_data['sr_1_fw_z']) + float(sb_data['sr_1_fw_p'])
-                if jm_item > 0:
-                    # 本期应纳税额减征额
-                    lw_jz = float(sb_data['sr_1_lw_p']) + float(sb_data['sr_1_lw_z'])
-                    fw_jz = float(sb_data['sr_1_fw_z']) + float(sb_data['sr_1_fw_p'])
-                    print('劳务、服务 减征',lw_jz,fw_jz)
-                    self.driver.execute_script("$('#sbbxxForm input[name=bqynsejze_18_1]').val(%s).trigger('change');" % round(lw_jz*0.02,2))
-                    self.driver.execute_script("$('#sbbxxForm input[name=bqynsejze_18_2]').val(%s).trigger('change');" % round(fw_jz*0.02,2))
-                # 应纳税额合计
-                # $('#sbbxxForm input[name=ynsehj_22_2]').val()
-                yn_hj = self.driver.execute_script("return $('#sbbxxForm input[name=ynsehj_22_2]').val();")
-                print('应纳税额合计',yn_hj)
-
-                if jm_item > 0:    
-                    self.driver.switch_to.default_content()
-                    sleep(2)
-                    # 填写附表3
-                    self.driver.execute_script("$(\"#page-tree\").find(\"option[name='zzsjmssbmxb']\").attr(\"selected\",true).trigger('change');")
-                    htool.driver_close_alert(self.driver,3)
-                    self.iframe = self.driver.find_element_by_xpath('//div[@id="iframes"]/iframe[@name = "zzsjmssbmxb"]')
-                    self.driver.switch_to.frame(self.iframe)
-                    self.driver.execute_script("$('#zzsjmssbmxbTable .sbt-table-add').click();")
-                    sleep(1)
-                    # 选择框可能报错，需要屏蔽
-                    try:
-                        self.driver.execute_script("$('.sb_table_select select[name=hmc]').find(\"option:contains('0001011608|SXA031901121')\").attr(\"selected\",true).trigger('change');")
-                    except:
-                        pass
-                    self.driver.execute_script("$('#zzsjmssbmxbTable input[name=bqfse]').val(%s).trigger('change');" % round(jm_item*0.02,2))
-                    self.driver.execute_script("$('#zzsjmssbmxbTable input[name=bqsjdjse]').val(%s).trigger('change');" % round(jm_item*0.02,2))
-                    self.driver.execute_script("getJmForm();")
-                    jm_ret = htool.driver_close_alert(self.driver,3)
-                    if '校验通过' in jm_ret[-1]:
-                        print(jm_ret[-1])
-                    else:
-                        # 其它情况，待处理
-                        pass    
             else:
                 # 货物及劳务
-                lw_total = float(sb_data['sr_3_lw_z']) + float(sb_data['sr_3_lw_p']) + float(sb_data['sr_1_lw_z']) + float(sb_data['sr_1_lw_p'])
-                self.driver.execute_script("$('#sbbxxForm input[name=xwqymsxse_10_1]').val(%s).trigger('change');" % lw_total)
+                self.driver.execute_script("$('#sbbxxForm input[name=xwqymsxse_10_1]').val(%s).trigger('change');" % lw_p_total)
                 # 服务、不动产和无形资产
-                fw_total = float(sb_data['sr_3_fw_z']) + float(sb_data['sr_3_fw_p']) + float(sb_data['sr_1_fw_z']) + float(sb_data['sr_1_fw_p'])
-                self.driver.execute_script("$('#sbbxxForm input[name=xwqymsxse_10_2]').val(%s).trigger('change');" % fw_total)
-            self.driver.switch_to.default_content()
-            # sb_ret = self.driver.execute_script("xgmshenbao();")
-            # print('小规模增值税报税结果',sb_ret)
-            # htool.driver_close_alert(self.driver,3)
+                self.driver.execute_script("$('#sbbxxForm input[name=xwqymsxse_10_2]').val(%s).trigger('change');" % fw_p_total)
+                if jm_item > 0:
+                    # 本期应纳税额减征额
+                    self.driver.execute_script("$('#sbbxxForm input[name=bqmse_19_2]').val(%s).trigger('change');" % round(jm_item*0.03,2))
+                    self.driver.execute_script("$('#sbbxxForm input[name=xwqymse_20_2]').val(%s).trigger('change');" % round(jm_item*0.03,2))
 
+            # 应纳税额合计
+            # $('#sbbxxForm input[name=ynsehj_22_2]').val()
+            rt_hj_1 = self.driver.execute_script("return $('#sbbxxForm input[name=bqybtse_24_1]').val();")
+            rt_hj_2 = self.driver.execute_script("return $('#sbbxxForm input[name=bqybtse_24_2]').val();")
+            bqybt = float(rt_hj_1.replace(',','')) + float(rt_hj_2.replace(',',''))
+           
+            # 填写附表3
+            self.driver.switch_to.default_content()
+            self.driver.execute_script("$(\"#page-tree\").find(\"option[name='zzsjmssbmxb']\").attr(\"selected\",true).trigger('change');")
+            htool.driver_close_alert(self.driver,3)
+            self.iframe = self.driver.find_element_by_xpath('//div[@id="iframes"]/iframe[@name = "zzsjmssbmxb"]')
+            self.driver.switch_to.frame(self.iframe)
+
+            # 填写具体优惠
+            yh_index = 0
+            if (total_money/ss_period) > 100000 and jm_item > 0:
+                # 新冠优惠期间1%点的优惠
+                self.driver.execute_script("$('#zzsjmssbmxbTable .sbt-table-add').click();")
+                # 选择框可能报错，需要屏蔽
+                try:
+                    self.driver.execute_script("$('.sb_table_select select[name=hmc]').eq(%s).find(\"option:contains('0001011608|SXA031901121')\").attr(\"selected\",true).trigger('change');" % yh_index)
+                except:
+                    pass
+                self.driver.execute_script("$('#zzsjmssbmxbTable input[name=bqfse]').eq(%s).val(%s).trigger('change');" % (yh_index,round(jm_item*0.02,2)))
+                self.driver.execute_script("$('#zzsjmssbmxbTable input[name=bqsjdjse]').eq(%s).val(%s).trigger('change');" % (yh_index,round(jm_item*0.02,2)))
+                yh_index += 1
+            # 税控盘实际抵减额
+            sk_rel_dis = 0
+            if float(sb_data['skp_or_fwf_total']) > 0:
+                self.driver.execute_script("$('#zzsjmssbmxbTable .sbt-table-add').click();")
+                # 选择框可能报错，需要屏蔽
+                try:
+                    self.driver.execute_script("$('.sb_table_select select[name=hmc]').eq(%s).find(\"option:contains('0001129914|SXA031900185')\").attr(\"selected\",true).trigger('change');" % yh_index)
+                except:
+                    pass
+                self.driver.execute_script("$('#zzsjmssbmxbTable input[name=bqfse]').eq(%s).val(%s).trigger('change');" % (yh_index,sb_data['skp_or_fwf_total']))
+                if bqybt > 0:
+                    # 实际可抵扣金额
+                    if bqybt > float(sb_data['skp_or_fwf_total']):
+                        sk_rel_dis = float(sb_data['skp_or_fwf_total'])
+                    else:
+                        sk_rel_dis = bqybt
+                    self.driver.execute_script("$('#zzsjmssbmxbTable input[name=bqsjdjse]').eq(%s).val(%s).trigger('change');" % (yh_index,sk_rel_dis))
+
+            self.driver.execute_script("getJmForm();")
+            jm_ret = htool.driver_close_alert(self.driver,3)
+            if '校验通过' in jm_ret[-1]:
+                print(jm_ret[-1])
+            else:
+                # 其它情况，待处理
+                pass
+
+            # 切换到主表iframe
+            self.driver.switch_to.default_content()
+            self.iframe = self.driver.find_element_by_xpath('//div[@id="iframes"]/iframe[@name = "zzsxgmsb"]')
+            self.driver.switch_to.frame(self.iframe)
+            # 重新填写实际可抵扣金额
+            if sk_rel_dis > 0:
+                self.driver.execute_script("$('#sbbxxForm input[name=bqynsejze_18_2]').val(%s).trigger('change');" % sk_rel_dis)
+            # 本期应纳税额减征额 18-1 18-2
+            if (total_money/ss_period) > 100000 and jm_item > 0:
+                jm_lw_item = float(sb_data['sr_1_lw_z']) + float(sb_data['sr_1_lw_p'])
+                self.driver.execute_script("$('#sbbxxForm input[name=bqynsejze_18_1]').val(%s).trigger('change');" % round(jm_lw_item*0.02,2))
+                jm_fw_item = float(sb_data['sr_1_fw_z']) + float(sb_data['sr_1_fw_p']) + sk_rel_dis
+                self.driver.execute_script("$('#sbbxxForm input[name=bqynsejze_18_2]').val(%s).trigger('change');" % round(jm_fw_item*0.02,2))
+             
+            rt_hj_1 = self.driver.execute_script("return $('#sbbxxForm input[name=ynsehj_22_1]').val();")
+            rt_hj_2 = self.driver.execute_script("return $('#sbbxxForm input[name=ynsehj_22_2]').val();")
+            yn_hj = float(rt_hj_1.replace(',','')) + float(rt_hj_2.replace(',',''))
+            print('应纳税额合计',yn_hj)
+            self.driver.switch_to.default_content()
+            self.driver.execute_script("xgmshenbao();")
+            sb_ret =  htool.driver_close_alert(self.driver,4)
+            print('小规模增值税报税结果',sb_ret[-1])
+            
             # 附加税申报
             fjs_url = tax_url.replace('SB00212','FJSF001')
             self.driver.get(fjs_url)
@@ -1621,37 +1917,56 @@ class TaxSite:
             self.driver.execute_script("layer.closeAll();")
             self.iframe = self.driver.find_element_by_xpath('//div[@id="iframes"]/iframe[@name = "main"]')
             self.driver.switch_to.frame(self.iframe)
-            if yn_hj != '0':
-                self.driver.execute_script("$('#mxTable input[name=ybzzs]').val(%s).trigger('change');" % yn_hj.replace(',',''))
-            # 后面替换成后台传递的数值
-            cj_yj = 0
-            jy_yj = 0
-            df_yj = 0
-            if '10109' in dk_data:
-                cj_yj += dk_data['10109']
-            fs_data = self.driver.execute_script("return $('#mxTable').table('getData');")
-            it_st = 0
-            print('已缴',cj_yj,jy_yj,df_yj)
-            for fs_it in fs_data:
-                if fs_it['zspmDm'] == '101090101':
-                    self.driver.execute_script("$('#mxTable input[name=bqyjse]').eq(%s).val(%s).trigger('change');" % (it_st,round(cj_yj,2)))
-                if fs_it['zspmDm'] == '302030100':
-                    self.driver.execute_script("$('#mxTable input[name=bqyjse]').eq(%s).val(%s).trigger('change');" % (it_st,round(jy_yj,2)))
-                if fs_it['zspmDm'] == '302160100':
-                    self.driver.execute_script("$('#mxTable input[name=bqyjse]').eq(%s).val(%s).trigger('change');" % (it_st,round(df_yj,2)))
-                cj_yj += 1
-                
-            sleep(800000)
+            # 应纳税额大于0的情况下，才需要填表
+            if yn_hj > 0:
+                self.driver.execute_script("$('#mxTable input[name=ybzzs]').val(%s).trigger('change');" % yn_hj)
+                # 后面替换成后台传递的数值
+                cj_yj = 0
+                jy_yj = 0
+                df_yj = 0
+                if '10109' in dk_data:
+                    cj_yj += dk_data['10109']
+                fs_data = self.driver.execute_script("return $('#mxTable').table('getData');")
+                it_st = 0
+                for fs_it in fs_data:
+                    # 地方教育附加
+                    if fs_it['zspmDm'] == '101090101':
+                        if cj_yj > 0:
+                            self.driver.execute_script("$('#mxTable input[name=bqyjse]').eq(%s).val(%s).trigger('change');" % (it_st,round(cj_yj,2)))
+                    if (total_money/ss_period) < 100000:
+                        try:
+                            self.driver.execute_script("$('#mxTable select[name=jmxzMc]').eq(%s).find(\"option:contains('%s')\").attr(\"selected\",true).trigger('change');" % (it_st,'0099129999|其他其他'))
+                        except:
+                            pass
+                        htool.driver_close_alert(self.driver,1)
+                    # 城市维护建设税 
+                    if fs_it['zspmDm'] == '302030100':
+                        if jy_yj > 0:
+                            self.driver.execute_script("$('#mxTable input[name=bqyjse]').eq(%s).val(%s).trigger('change');" % (it_st,round(jy_yj,2)))
+                    # 教育费附加        
+                    if fs_it['zspmDm'] == '302160100':
+                        if df_yj > 0:
+                            self.driver.execute_script("$('#mxTable input[name=bqyjse]').eq(%s).val(%s).trigger('change');" % (it_st,round(df_yj,2)))
+                    if (total_money/ss_period) < 100000:
+                        try:
+                            self.driver.execute_script("$('#mxTable select[name=jmxzMc]').eq(%s).find(\"option:contains('%s')\").attr(\"selected\",true).trigger('change');" % (it_st,'0061042802|按月'))
+                        except:
+                            pass
+                        htool.driver_close_alert(self.driver,1)
+                    it_st += 1
+            self.driver.switch_to.default_content()
+            self.driver.execute_script("shenbao();")    
         else:
             print(bddm,'对应的报税方法正在完善')
-        return htool.driver_close_alert(self.driver,3)
+        fjs_ret = htool.driver_close_alert(self.driver,3)    
+        return fjs_ret[-1]
 
     # 获取报税所需的代开发票数据
     def dkfp_bs_search(self,ssqq,ssqz):
         data = {'kjms':'mxkj','skssqq': ssqq,'skssqz':ssqz,'rtkrqq':'','rtkrqz':'','kpsjq':'','kpsjz':'','sz':''}
         # ret_msg = '获取代开发票申请数据失败'
         # try:
-        print('查询代开发票数据')
+        
         htool = HTool()
         dkfp_data = htool.post_data(self.agent_list_url,data,self.driver)
         dk_val = {}
@@ -1666,10 +1981,11 @@ class TaxSite:
                     dk_val[jj['zsxmDm']] = float(jj['sjje'])
                 else:
                     dk_val[jj['zsxmDm']] += float(jj['sjje'])
+        print('查询代开发票数据',dk_val)            
         return dk_val
 
     # 获取增值税报税所需数据   
-    def get_value_add_data(self,post_data):
+    def get_tax_sb_data(self,post_data):
         htool = HTool()
         export_data = htool.post_data(self.tax_export_data_url,post_data,self.driver)
         if export_data.status_code == 200:

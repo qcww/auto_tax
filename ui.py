@@ -70,6 +70,9 @@ class MainMenu ( wx.Frame ):
 		self.kk_btn = wx.ToggleButton( sbSizer2.GetStaticBox(), wx.ID_ANY, u"扣款", wx.DefaultPosition, wx.DefaultSize, 0 )
 		sbSizer2.Add( self.kk_btn, 0, wx.ALL|wx.ALIGN_CENTER_HORIZONTAL, 5 )
 
+		self.bs_upload_btn = wx.ToggleButton( sbSizer2.GetStaticBox(), wx.ID_ANY, u"报税上传", wx.DefaultPosition, wx.DefaultSize, 0 )
+		sbSizer2.Add( self.bs_upload_btn, 0, wx.ALL, 5 )
+
 
 		bSizer3.Add( sbSizer2, 1, wx.EXPAND, 5 )
 
@@ -86,6 +89,7 @@ class MainMenu ( wx.Frame ):
 		self.agent_btn.Bind( wx.EVT_TOGGLEBUTTON, self.add_agent_task )
 		self.report_btn.Bind( wx.EVT_TOGGLEBUTTON, self.add_auto_tax_task )
 		self.kk_btn.Bind( wx.EVT_TOGGLEBUTTON, self.add_kk_task )
+		self.bs_upload_btn.Bind( wx.EVT_TOGGLEBUTTON, self.task_upload_task )
 
 	def __del__( self ):
 		pass
@@ -105,6 +109,9 @@ class MainMenu ( wx.Frame ):
 		event.Skip()
 
 	def add_kk_task( self, event ):
+		event.Skip()
+
+	def task_upload_task( self, event ):
 		event.Skip()
 
 

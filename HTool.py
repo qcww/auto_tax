@@ -322,3 +322,13 @@ class HTool(HTMLParser):
             month += 1
         res = datetime.datetime(year,month,1)+datetime.timedelta(days = 1)
         return res
+
+    # 返回两个数字转浮点数后对比结果
+    def match_fl_val(self,val_1,val_2):
+        val_1 = str(val_1)
+        val_2 = str(val_2)
+        return round(float(val_1.replace(',','')),2) == round(float(val_2.replace(',','')),2)
+
+    # 生成数据集合
+    def to_match_f1(self,sb_data,tp,t_index):
+        return [sb_data['sr_%s%s_z' % (t_index,tp)],sb_data['tax_%s%s_z' % (t_index,tp)],sb_data['sr_%s%s_p' % (t_index,tp)],sb_data['tax_%s%s_p' % (t_index,tp)]]

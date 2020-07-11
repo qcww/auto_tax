@@ -109,6 +109,14 @@ class Ep(ui.MainMenu):
         else:
             self.kk_btn.SetLabel('扣款')
 
+    def task_upload_task(self,event):
+        self.auto_upload = bool(1-self.auto_upload)
+        self.bs_upload_btn.SetValue(self.auto_upload)
+        if self.auto_upload == True:
+            self.bs_upload_btn.SetLabel('正在上传')
+        else:
+            self.bs_upload_btn.SetLabel('报税上传')   
+
     def add_auto_tax_task(self,event):
         self.auto_tax = bool(1-self.auto_tax)
         self.report_btn.SetValue(self.auto_tax)
@@ -130,6 +138,7 @@ class Ep(ui.MainMenu):
         self.auto_kk = False
         self.auto_tax = False
         self.auto_dkfp = False
+        self.auto_upload = False
 
         # self.set_status('已准备')
 
@@ -183,7 +192,10 @@ class Ep(ui.MainMenu):
                     self.add_task_tax_bundle()
                 if self.auto_dkfp == True:
                     self.add_log('自动获取代开发票数据')
-                    self.add_task_dkfp_bundle()    
+                    self.add_task_dkfp_bundle()
+                if self.auto_upload  == True:
+                    self.add_log('自动获取报税数据')
+                    self.add_task_swsb_bundle()     
             time.sleep(5)
 
 
@@ -256,6 +268,12 @@ class Ep(ui.MainMenu):
     # 添加任务
     def add_task(self,corp_list):
         # 单独处理批量操作
+        if corp_list == 'bundle||5':
+            self.auto_upload = True
+            return '自动执行批量扣款'
+        elif corp_list == 'bundle||-5':
+            self.auto_upload = False
+            return '自动扣款任务已暂停'
         if corp_list == 'bundle||7':
             self.auto_kk = True
             return '自动执行批量扣款'
@@ -345,11 +363,32 @@ class Ep(ui.MainMenu):
         self.set_status(ret)
         return ret
 
+    def add_task_swsb_bundle(self):
+        print('自动获取未上传报税')
+        tax_list = self.tax_site.get_sw_sb_data()
+        # print('tax_list',tax_list)
+        # 没有任务了，自动停止批量操作
+        if len(tax_list['rows']) == 0:
+            self.add_log('批量请求待上传报税企业为空，自动暂停')
+            self.auto_upload = False
+            self.bs_upload_btn.SetValue(self.auto_upload)
+            self.bs_upload_btn.SetLabel('报税上传')
+        
+        for re in tax_list['rows']:
+            print(re)
+            post = (re['corpid'],re['corpname'],re['credit_code'],re['tax_pwd_gs'],re['sbrqq'],re['sbrqz'],"5")
+            post_data = '||'.join(post)
+            self.add_task(post_data)
+        # ret = '剩余待上传开具发票公司:' + tax_list['total']
+        # self.set_status(ret)
+        # return ret
+
     # 执行成功,删除任务
     def remove_task(self):
-        self.task_arr.pop(self.running_index)
-        self.running_index -= 1
-        self.task_list.Delete(0)
+        if len(self.task_arr) > 0:
+            self.task_arr.pop(self.running_index)
+            self.running_index -= 1
+            self.task_list.Delete(0)
 
     def post_link(self,link,post_data):
         headers = {'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/52.0.2743.116 Safari/537.36 Edge/15.15063'}

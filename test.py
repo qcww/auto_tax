@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 from urllib.parse import parse_qs
 from bs4 import BeautifulSoup
 from PIL import Image, ImageEnhance
-from SbSite import Export
+# from SbSite import Export
 
 class Test:
     def __init__(self):
@@ -737,7 +737,6 @@ class Test:
 
     def insert_log(self,msg):
         print(msg)    
-   
 
 test = Test()
 # res = test.get_sb_detail()
@@ -761,7 +760,7 @@ test = Test()
 # print(tax)
 
 # 税务局代开发票金额查询
-test.dkfp_bs_search()
+# test.dkfp_bs_search()
 
 # sb_site = Export()
 # sb_site.open_browser()
@@ -769,3 +768,11 @@ test.dkfp_bs_search()
 # if login_ret == False:
 #     print('登录失败')
 # sb_site.get_sb_data()
+
+def match_fl_val(val_1,val_2):
+    val_1 = str(val_1)
+    val_2 = str(val_2)
+    print(round(float(val_1.replace(',','')),2) , round(float(val_2.replace(',','')),2))
+    return round(float(val_1.replace(',','')),2) == round(float(val_2.replace(',','')),2)
+
+print(match_fl_val('1640.17','16,460.17'))    
