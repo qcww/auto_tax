@@ -11,6 +11,7 @@ import xml.dom.minidom
 import time
 import regedit
 import math
+import random
 
 from time import sleep
 from selenium import webdriver
@@ -74,6 +75,10 @@ class TaxSite:
         self.bundle_kk_status_url = config['link']['bundle_kk_status_url']
         # 待上传税务报表客户
         self.ready_sw_url = config['link']['ready_sw_url']
+        # 社保账号密码
+        self.si_account_ret_url = config['link']['si_account_ret_url']
+        # 报税，社保申报结果上传
+        self.sb_auto_ret_url = config['link']['sb_auto_ret_url']
 
         # 需要获取代开具发票的企业
         self.agent_ready_url = config['link']['agent_ready_url']
@@ -96,7 +101,7 @@ class TaxSite:
 
     def set_corp(self,corp_list):
         self.insert_log('') 
-        self.corpid, self.corpname, self.credit_code, self.pwd, self.sbrqq, self.sbrqz,self.action = corp_list.split('||',7)
+        self.corpid, self.corpname, self.credit_code, self.pwd, self.sbrqq, self.sbrqz,self.action= corp_list.split('||',7)
         self.insert_log("执行请求:"+self.corpname + " " + self.action)
         return self.corpid
 
@@ -155,8 +160,9 @@ class TaxSite:
             login_open = driver.find_element_by_id("login")#获取打开登录框的按钮
             login_open_click = Action.click(login_open)#点击
             login_open_click.perform()
-            sleep(2)
-
+            sleep(1)
+            # driver.execute_script('init.openLoginView()')
+            
             # driver.switch_to.frame("loginSrc")#切换到登录框iframe
             tax_code_input = driver.find_element_by_id("username")
             pwd_input = driver.find_element_by_id("password")
@@ -166,14 +172,12 @@ class TaxSite:
             login_btn = driver.find_element_by_xpath("//form[@id='fm3']/div/button[@class='button fr']")
             tax_code_input.send_keys(self.credit_code)
             pwd_input.send_keys(self.pwd)
-            
             parse_code = self.parse_action()
-
             verify_code.send_keys(parse_code)
             #点击登录
             login_btn_click = Action.click(login_btn)
             login_btn_click.perform()
-            sleep(2)
+            sleep(4)
             # 判断是否有密码错误的提示框出来 
             pass_err = driver.find_element_by_id("layui-layer1")
             if pass_err:
@@ -195,8 +199,8 @@ class TaxSite:
                     self.driver.execute_script("window.location.reload()")
                     self.insert_log("验证码识别结果不正确，请等待")
                     # self.taxObj.remove_task()
-        except :
-            pass
+        except Exception as e:
+            print(e)
         
         # 判断是否登录成功
         try:
@@ -206,12 +210,18 @@ class TaxSite:
                 print('登录失败，重新登录')
                 print('login_times',login_times)
                 return self.login_action(login_times)
-        except :
-            pass
-        self.driver.execute_script("$_ajax({url: url_kqxx,success: function(c) {fuser['uuid']=c[0].DJXH;}});")
-        sleep(1)
-        self.fuser = self.driver.execute_script("return fuser;")
-        print('self.fuser',self.fuser)
+        except Exception as e:
+            print(e)
+        try:
+            self.driver.execute_script("$_ajax({url: url_kqxx,success: function(c) {fuser['uuid']=c[0].DJXH;}});")
+            sleep(1)
+
+            self.fuser = self.driver.execute_script("return fuser;")
+            if 'uuid' not in self.fuser:
+                self.fuser['uuid'] = ''
+        except Exception as e:
+            print('获取用户信息失败',e)
+            return False
         return True
 
 
@@ -240,8 +250,9 @@ class TaxSite:
             close_layer_btn = driver.find_element_by_class_name("layui-layer-close")
             close_layer = Action.click(close_layer_btn)#关闭弹窗
             close_layer.perform()
-        except :
-            pass
+        except Exception as e:
+            print('登录页面初始化失败',e)
+
 
     # 执行操作
     def driver_auto_action(self):
@@ -279,24 +290,6 @@ class TaxSite:
                 self.dkfp_search()
                
         self.driver.quit()        
-
-    # 获取申报统计数据
-    def syn_user_total(self):
-        ret_msg = '获取申报统计数据失败'
-        try:
-            data = {'sbrqq': self.sbrqq, 'sbrqz': self.sbrqz}
-            post_res = htool.post_data(self.tax_data_url,data,self.driver)
-            res = self.get_qmld(post_res)
-            if res:
-                print('上传申报统计数据')
-                # print(str(res))
-                syn_res = htool.post_data(self.tax_send_url,{'data':str(res),'corpid':self.corpid})
-                if syn_res.status_code == 200:
-                    ret_msg = '获取申报统计数据成功'
-        except:
-            pass
-
-        return ret_msg
 
     # 公司登记信息
     def get_comp_info(self):
@@ -343,8 +336,8 @@ class TaxSite:
                 syn_res = htool.post_data(self.tax_confirm_info_url,{'info':str(rt_dict),'corpid':self.corpid})
                 if syn_res.status_code == 200:
                     ret_msg = '获取税费（种）认定信息成功'
-        except:
-            pass
+        except Exception as e:
+            print('获取税费种信息失败',e)
         return ret_msg
 
     # 检查当前关键词是否都在模板里匹配
@@ -365,10 +358,9 @@ class TaxSite:
             sb_data = htool.post_data(self.tax_data_url,data,self.driver)
             # print('获取详情结果',sb_data.text)
         except Exception as e:
-            print(e)
-            return ret_msg
+            print('获取已申报信息失败',e)
+            return False
 
-        
         if sb_data and sb_data.status_code == 200:
             try:
                 # print('统计数据结果',sb_data.text)
@@ -376,7 +368,7 @@ class TaxSite:
             except Exception as e:
                 print(e)
                 self.insert_log(self.corpname+": 获取申报数据失败,解析统计数据页面出错")
-                return "获取申报数据失败,解析统计数据页面出错"
+                return False
             
             rt = []
             
@@ -427,6 +419,8 @@ class TaxSite:
         
                             row_detail = self.parseTax(initData,parse_match_temp,parse_common_data)
                         # print(row_detail)
+                        else:
+                            print(sb_data.text)
                         rt.append(row_detail)
                     else:
                         cat_add = True
@@ -454,24 +448,27 @@ class TaxSite:
                     for i in ss_data[ss_item]:
                         qmldse += float(i['qmldse'])
                     res = htool.post_data(self.tax_update_url,{"corpid":self.corpid,'period':period,'qmldse':qmldse,'fill_date':fill_date,"msg":"自动更新[所属期：%s - 已申报税收数据]完成 期末留抵税额:%s" % (period,qmldse),"data":json.dumps(ss_data[ss_item])})
-                    print('申报结果',ss_data,res.text)
+                    print('申报结果',res.text)
                     if res.status_code == 200:
                         res_text = json.loads(res.text)
                         if res_text['code'] != 0:
                             ret_msg = res_text['text']
                             self.insert_log(res_text['text'])
+                        else:
+                            return True    
                     else:
                         self.insert_log('上传税收数据时发生了一个错误')
             except Exception as e:
                 print(e)
                 self.insert_log(ret_msg)
                 # pahtool.post_data(self.tax_update_url,{"corpid":self.corpid,'period':period,'fill_date':sbrqz,"msg":"解析上传[%s-%s]已申报数据失败" % (sbrqq,sbrqz),"data":'[]'})ss
-            return ret_msg
+            return False
         else:
-            htool.post_data(self.tax_update_url,{"corpid":self.corpid,'period':period,'fill_date':self.sbrqz,"msg":"从税务局网站获取[%s-%s]已申报数据失败" % (self.sbrqq,self.sbrqz),"data":'[]'})
+            print(sb_data.text)
+            htool.post_data(self.tax_update_url,{"corpid":self.corpid,'period':period,'fill_date':self.sbrqz,'qmldse':qmldse,"msg":"从税务局网站获取[%s-%s]已申报数据失败" % (self.sbrqq,self.sbrqz),"data":'[]'})
         self.insert_log(ret_msg)
         
-        return ret_msg
+        return False
 
     # 税收数据归类
     def ss_gl(self,ss_list):
@@ -649,16 +646,16 @@ class TaxSite:
         parse_common_data['json_detail'] = json.dumps(return_data)
         return parse_common_data
 
-    def get_sb_detail(self):
+    def get_sb_detail(self,all_month = True):
         sb_list = []
         htool = HTool()
-        err_msg,sb_list = self.get_sb_all(self.sbrqq,self.sbrqz,sb_list)
+        err_msg,sb_list = self.get_sb_all(self.sbrqq,self.sbrqz,sb_list,all_month)
         
         if err_msg != '':
             return err_msg
         
         if len(sb_list) == 0:
-            return '获取社保信息成功(为空)'
+            return True
         else:
             # 数据重新归类
             print('数据重新归类')
@@ -667,19 +664,19 @@ class TaxSite:
         for sb_period in sb_list:
             sb_list[sb_period]['json_detail'] = '['+','.join(sb_list[sb_period]['json_detail'])+']'
             # print(sb_list[sb_period])
+            print('上传社保结果')
             res = htool.post_data(self.tax_update_url,{"corpid":self.corpid,'period':sb_list[sb_period]['period'],'fill_date':sb_list[sb_period]['fill_date'],"msg":"自动更新[所属期：%s - 已申报社保数据]完成" % sb_list[sb_period]['period'],"data":json.dumps([sb_list[sb_period]])})
             if res.status_code == 200:
                 try:
                     res_text = json.loads(res.text)
-                    print(res_text)
                     if res_text['code'] != 0:
                         print(self.corpname+":获取社保信息失败 "+res_text['text'])
-                    
-                    return res_text['text']
+                        return False
                 except: 
-                    return '上传社保信息失败'
+                    return False
             else:
-                return '上传社保信息失败'
+                return False
+        return True        
 
     # 社保数据归类
     def sb_gl(self,sb_list):
@@ -701,10 +698,15 @@ class TaxSite:
         return gl_dict
 
     # 递归获取时间范围内所有申报
-    def get_sb_all(self,sbrqq,sbrqz,sb_list):
+    def get_sb_all(self,sbrqq,sbrqz,sb_list,all_month=True):
         # 获取单位核定申报与单位自主申报数据
         htool = HTool()
-        rel_sbrqq,rel_sbrqz,end = htool.split_time(sbrqq,sbrqz)
+        if all_month == True:
+            rel_sbrqq,rel_sbrqz,end = htool.split_time(sbrqq,sbrqz)
+        else:
+            rel_sbrqq = sbrqq
+            rel_sbrqz = sbrqz 
+            end = True
         for i in range(0,2):
             data = {'sbrqq': rel_sbrqq, 'sbrqz': rel_sbrqz,'sbbzlDm':i}
             ret_msg = '获取社保信息失败'
@@ -730,7 +732,7 @@ class TaxSite:
                 except:
                     return ret_msg,sb_list
             else:
-                self.insert_log('请求社保接口出错')
+                self.insert_log('请求社保接口出错',sb_data.text)
                 return ret_msg,sb_list
 
     # 解析社保详情
@@ -834,6 +836,7 @@ class TaxSite:
         htool = HTool()
         # 获取缴款账户，如果没有账户直接跳过，如果有多个
         bank_data = htool.post_data(self.net_bank_url,{},self.driver)
+        self.taxObj.remove_task()
 
         if bank_data.status_code == 200:
             tbrq = time.strftime("%Y-%m-01",time.localtime())
@@ -847,27 +850,26 @@ class TaxSite:
                     kk_post_data['msg'] = ret_msg
                     pos_ret = htool.post_data(self.tax_kk_sb_url,kk_post_data)
                     print(pos_ret.text)
-                    self.taxObj.remove_task()
+                    
                     return ret_msg
-            except:
+            except Exception as e:
+                print('获取税费银信息时出错',e)
                 ret_msg = '解析待扣款数据出错，请手动登录网站检查'
                 # kk_post_data = {"corpid":self.corpid,"kk_status":2,"tax_code":"","ssqq":"","ssqz":"","kk_item_name":"","msg":ret_msg}
                 kk_post_data['msg'] = ret_msg
                 htool.post_data(self.tax_kk_sb_url,kk_post_data)
-                self.taxObj.remove_task()
                 return ret_msg
 
         else:
             ret_msg = '获取扣款账户失败'
+            print(ret_msg,bank_data.text)
             return ret_msg
 
         # 税务扣款信息
         # print('扣除企业或个税税款')
-        self.kk_item_num = 2
         self.driver.get(self.tax_kk_page_url)
         # print('打开扣款界面')
         sleep(5)
-        self.taxObj.remove_task()
         tax_kk_ret = self.do_tax_kk_action(bank_num)
         # print('扣款上传结果',tax_kk_ret)
         self.insert_log(tax_kk_ret['msg'])
@@ -883,10 +885,10 @@ class TaxSite:
         htool.post_data(self.tax_kk_sb_url,sb_kk_ret)
         print("社保扣款提交结果",sb_kk_ret)
 
-        if self.kk_item_num == 0:
-            jkrqq = time.strftime("%Y-%m-01",time.localtime())
-            jkrqz = time.strftime("%Y-%m-%d",time.localtime())
-            self.update_kk_info(jkrqq,jkrqz)
+
+        jkrqq = time.strftime("%Y-%m-01",time.localtime())
+        jkrqz = time.strftime("%Y-%m-%d",time.localtime())
+        self.update_kk_info(jkrqq,jkrqz)
         return sb_kk_ret['msg'] + ',' + tax_kk_ret['msg']
 
     # 社保缴纳
@@ -910,7 +912,6 @@ class TaxSite:
         if kk_item_num == 0:
             kk_post_data['kk_status'] = 1
             kk_post_data['msg'] = '扣款成功,社保费缴纳信息为空'
-            self.kk_item_num -= 1
             return kk_post_data
 
         sleep(5)
@@ -992,7 +993,6 @@ class TaxSite:
         if kk_item_num == 0:
             kk_post_data['kk_status'] = 1
             kk_post_data['msg'] = '扣款成功,税费缴纳信息为空'
-            self.kk_item_num -= 1
             return kk_post_data
 
         sleep(5)
@@ -1244,12 +1244,9 @@ class TaxSite:
         sb_status = 0
         # try:
         tax_info = htool.get_data(self.tax_info_url,self.driver)
-        sbrqq = time.strftime("%Y-%m-01",time.localtime())
-        sbrqz = time.strftime("%Y-%m-%d",time.localtime())
-
-        data = {'sbrqq': sbrqq,'sbrqz': sbrqz,'zsxmDm': '','uuid':self.fuser['uuid']}
-        
-        ret_msg = '获取申报统计数据失败'
+        self.sbrqq = time.strftime("%Y-%m-01",time.localtime())
+        self.sbrqz = time.strftime("%Y-%m-%d",time.localtime())
+        data = {'sbrqq': self.sbrqq,'sbrqz': self.sbrqz,'zsxmDm': '','uuid':self.fuser['uuid']}
         try:
             sb_data = htool.post_data(self.tax_data_url,data,self.driver)
         except Exception as e:
@@ -1315,7 +1312,7 @@ class TaxSite:
         # except:
         #     print('读取解析税费种认定信息时发生错误')
         #     return False
-
+        print('self.ready_tax',tax_dict)
         self.ready_tax = tax_dict
         return True
 
@@ -1345,11 +1342,12 @@ class TaxSite:
         if post_res.status_code == 200:
             return json.loads(post_res.text)
         else:
-            return {}
+            return {"rows":[]}
 
     # 社保申报
     def social_insurance(self):
         self.taxObj.remove_task()
+        post_data = {"corpid":self.corpid,"content":"","comp_status":0}
         htool = HTool()
         ssqz = htool.last_day_of_month()
         si_url = self.tax_config_info['ah_sb_url_pre'] + 'nsrsbh=%s&bddm=SBFSB01&uuid=&ssqq=%s&ssqz=%s' % (self.credit_code,time.strftime("%Y-%m-01",time.localtime()),ssqz)
@@ -1357,21 +1355,42 @@ class TaxSite:
         sb_jn_ret = htool.driver_close_alert(self.driver,3)    
         # 判断有无社保或需不需要缴纳
         if len(sb_jn_ret) > 0:
+            print(sb_jn_ret[-1])
+            post_data['content'] = sb_jn_ret[-1]
             # 无需申报无需申报
             if '您尚未进行社保登记' in sb_jn_ret[-1]:
-                print(sb_jn_ret)
-                return False
+                post_data['comp_status'] = 9
+                return self.check_sb_result(post_data)
             # 可能已经申报过 
             elif '没有查询到人社部门的核定信息' in sb_jn_ret[-1]:
-                return True
+                post_data['comp_status'] = 1
+                return self.check_sb_result(post_data)
+            else:
+                return self.check_sb_result(post_data)
 
-        sb_account = 499096
-        sb_pwd = 499096
+        # 获取社保账号密码
+        get_acc_ret = htool.post_data(self.si_account_ret_url,{'corpid':self.corpid})
+        sb_account = sb_pwd = ''
+        print('获取社保账号密码结果',get_acc_ret.text)
+        if get_acc_ret.status_code == 200:
+            tax_json = json.loads(get_acc_ret.text)
+            if 'shebao_number' not in tax_json or 'shebao_pwd' not in tax_json:
+                post_data['comp_status'] = 2
+                post_data['content'] = '社保账号或密码不正确，请及时修改'
+                return self.check_sb_result(post_data)
+            sb_account = tax_json['shebao_number']
+            sb_pwd = tax_json['shebao_pwd']
+        else:
+            post_data['content'] = '获取社保账号密码时发生错误'
+            return self.check_sb_result(post_data)
+        # sb_account = 499096
+        # sb_pwd = 499096
         # 登录社保网站核定金额
         sb_site = SbExport(self)
         login_ret = sb_site.login(sb_account,sb_pwd)
         if login_ret == False:
-            print('登录失败')
+            post_data['content'] = '登录社保网站失败'
+            return self.check_sb_result(post_data)
         # 通过社保局核定的金额 
         hd_je = sb_site.get_sb_data()
         print('核定社保金额',hd_je)
@@ -1387,31 +1406,68 @@ class TaxSite:
         for mx_item in hd_sb_data:
             yjfe += float(mx_item['yjfe'])
         if int(yjfe) != hd_je:
-            print('缴费金额不一致，请核对')
-            return False
+            post_data['comp_status'] = 2
+            post_data['content'] = '税务网站与社保网站应缴金额不一致，请确定'
+            return self.check_sb_result(post_data)
         self.driver.execute_script("$('#sbfjs .sbt-checkbox-all').click();")
 
         print('社保检验')
         # self.driver.switch_to.default_content()
         self.driver.execute_script("shenbao();")
         fjs_ret = htool.driver_close_alert(self.driver,3)    
-        print(fjs_ret[-1]) 
+        print(fjs_ret[-1])
+        post_data['content'] = fjs_ret[-1]
+        return self.check_sb_result(post_data)
+
+    # 继续判断处理社保申报结果
+    def check_sb_result(self,result):
+        print('继续判断社保结果',result)
+        htool = HTool()
+        post_data = {"corpid":self.corpid,"content":"","sb_status":0}
+        sb_ret = False
+        if result['comp_status'] == 1:
+            # 延迟几秒时间，避免未查询到数据问题
+            sleep(3)
+            sb_ret = self.get_sb_detail(False)
+            print('最终上传社保结果',sb_ret)
+            if sb_ret == True:
+                post_data['content'] = '社保已申报并上传成功'
+                post_data['sb_status'] = 1
+        elif result['comp_status'] == 9:
+            post_data['sb_status'] = 9
+            post_data['content'] = result['content']
+        else:
+            post_data['sb_status'] = 2
+            post_data['content'] = result['content']     
+            
+        export_data = htool.post_data(self.sb_auto_ret_url,post_data)
+        if export_data.status_code != 200:
+            print('上传报税结果错误',export_data.text)
+        else:
+            self.insert_log('成功提交社保申报结果')
+        print('社保接口提交数据',post_data)    
 
     # 报税
     def tax_sb(self):
-        ret_msg = ''
         hd_ret = self.ready_tax_info()
+        htool = HTool()
+        post_data = {"corpid":self.corpid,"content":"","tax_status":0}
+        self.sbrqq = time.strftime("%Y-%m-01",time.localtime())
+        self.sbrqz = time.strftime("%Y-%m-%d",time.localtime())
+        # 报税完成状态
+        tax_sb_status = False
 
         # 核定失败了
         if hd_ret == False:
             return False
-        print('核定申报',self.ready_tax)
+        # print('核定申报',self.ready_tax)
         
         # try:
         # 印花税按次申报，全部零申报(需要先查询下税费核定)
         # self.yhs_ac_sb()
         if len(self.ready_tax) != 0:
             # 解析链接中绑定代码分批次报税
+            log_arr = []
             for tax_name in self.ready_tax:
                 tax = self.ready_tax[tax_name]
                 self.insert_log(tax['desc'])
@@ -1419,17 +1475,34 @@ class TaxSite:
                 if tax['bddm'] == 'FJSF001':
                     continue
                 sb_ret = self.do_tax_sb(tax)
-                print(sb_ret)
+                log_arr.append(sb_ret+'[%s]' % tax['desc'])
+
+            # 延迟几秒再查询，否则数据更新不及时
+            sleep(5)
             # 比对数据，上传结果
             hd_ret = self.ready_tax_info()
-            if hd_ret == True and len(self.ready_tax) == 0:
-                print('报税已完成')
-                pass
-            
-        else:
-            self.insert_log('待申报为空')
 
-        return ret_msg   
+            # 待申报数据为空，继续上传报表为成功
+            if hd_ret == True and len(self.ready_tax) == 0:
+                tax_sb_status = True
+            post_data['content'] = ','.join(log_arr)
+        else:
+            tax_sb_status = True
+            print('待申报为空')
+
+        print('报税完成状态',tax_sb_status)
+        if tax_sb_status == True:
+            # 报税完成，更新报税信息数据成功时修改报税状态
+            print('获取报税信息结果')
+            tax_sb = self.get_tax_detail()
+            if tax_sb == True:
+                if post_data['content'] == '':
+                    post_data['content'] = '更新上传纳税申报信息成功'
+                post_data['tax_status'] = 1
+        print('汇总结果',post_data)        
+        export_data = htool.post_data(self.sb_auto_ret_url,post_data,self.driver)
+        if export_data.status_code != 200:
+            print('上传报税结果错误')
         # except:
         #     ret_msg = '获取代办事项失败'
         #     return ret_msg
@@ -1447,13 +1520,20 @@ class TaxSite:
             htool.driver_close_alert(self.driver,3)
             parse_sb_data = self.driver.execute_script("return $('#sbbTable').table('getData');")
 
+            st_index = 0
             for sb_item in parse_sb_data:
                 # 水利建设基金
                 if 'zspmDm' in sb_item and sb_item['zspmDm'] == '302210400':
-                    # 测试数据，需替换成对应数字
-                    self.driver.execute_script("$('input[name=ysx]').eq(0).val(200).trigger('change');")
+                    # 报税所需数据
+                    sb_data = self.get_tax_sb_data(tax_info)
+                    if 'pmdm' not in sb_data or 'shouru' not in sb_data:
+                        print('水利基金获取报税数据失败')
+                        return False
+                    print('申报数据',sb_data)
+                    sr_total = sb_data['shouru']
+                    self.driver.execute_script("$('input[name=ysx]').eq(%s).val(%s).trigger('change');" % (st_index,sr_total))
                     htool.driver_close_alert(self.driver)
-                    # sleep(15)
+                st_index += 1    
             self.driver.execute_script("shenbao();")
         # 企业所得税(暂未区分A类或B类)
         elif bddm == 'SDSYJB93':
@@ -1462,8 +1542,14 @@ class TaxSite:
             htool.driver_close_alert(self.driver,3)
             # $('#page-tree').children('option').length
             # 本年收入累计
-            yycb = 8000
+            sb_data = self.get_tax_sb_data(tax_info)
+            if 'pmdm' not in sb_data or 'shouru' not in sb_data:
+                print('企业所得税获取报税数据失败')
+                return False
 
+            # sb_data['shouru'] = 1452552.5
+            # sb_data['estimate_qysds_money'] = 5855
+            yysr = sb_data['shouru']
 
             # 填写附表部分
             option_num = self.driver.execute_script("return $('#page-tree').children('option').length;")
@@ -1488,28 +1574,31 @@ class TaxSite:
             self.driver.switch_to.frame(self.iframe)
             # 实际已缴纳所得税额
             
-            # 13行实际已缴纳所得税额
-            yjsdse = self.driver.execute_script("return $('#sbbxxForm input[name=sjyyjsdseLj]').val();")
-            # 14行 特定业务预缴（征）所得税额
-            tdywyjzsdseLj = self.driver.execute_script("return $('#sbbxxForm input[name=tdywyjzsdseLj]').val();")
-            # 15行 符合条件的小型微利企业延缓缴纳所得税额
-            fhtjxwqyyhjzsdseLj = self.driver.execute_script("return $('#sbbxxForm input[name=fhtjxwqyyhjzsdseLj]').val();")
+            # # 13行实际已缴纳所得税额
+            # yjsdse = self.driver.execute_script("return $('#sbbxxForm input[name=sjyyjsdseLj]').val();")
+            # # 14行 特定业务预缴（征）所得税额
+            # tdywyjzsdseLj = self.driver.execute_script("return $('#sbbxxForm input[name=tdywyjzsdseLj]').val();")
+            # # 15行 符合条件的小型微利企业延缓缴纳所得税额
+            # fhtjxwqyyhjzsdseLj = self.driver.execute_script("return $('#sbbxxForm input[name=fhtjxwqyyhjzsdseLj]').val();")
 
-            #1 营业收入
-            self.driver.execute_script("$('#sbbxxForm input[name=yysrLj]').val(%s).trigger('change');" % yycb)
+            if float(yysr) > 0:
 
-            #3 利润总额
-            lr_lj = float(yjsdse.replace(',','')) + float(tdywyjzsdseLj.replace(',','')) + float(fhtjxwqyyhjzsdseLj.replace(',',''))
-            if lr_lj > 250000:
-                lr_total = lr_lj/0.25
-            elif lr_lj > 50000:
-                lr_total = (lr_lj - 50000)/0.1 + 50000/0.05
-            else:
-                lr_total = lr_lj/0.05
-            self.driver.execute_script("$('#sbbxxForm input[name=lrzeLj]').val(%s).trigger('change');" % round(lr_total,2))
+                #1 营业收入
+                self.driver.execute_script("$('#sbbxxForm input[name=yysrLj]').val(%s).trigger('change');" % yysr)
+                # 客户交税，填写客户交税部分利润，不交税控制利润-2000~-5000
+                if float(sb_data['estimate_qysds_money']) > 0:
+                    # 客户交税
+                    lr_total = sb_data['estimate_qysds_money']
+                else:
+                    # 客户不交税
+                    lr_total = random.randint(-5000,-2000)
 
-            #2 营业成本
-            self.driver.execute_script("$('#sbbxxForm input[name=yycbLj]').val(%s).trigger('change');" % round(float(yycb) - lr_total))
+                #3 利润总额    
+                self.driver.execute_script("$('#sbbxxForm input[name=lrzeLj]').val(%s).trigger('change');" % round(lr_total,2))
+
+                #2 营业成本
+                self.driver.execute_script("$('#sbbxxForm input[name=yycbLj]').val(%s).trigger('change');" % round((float(yysr) - lr_total),2))
+
             # 是否高新技术企业 科技型中小企业 技术入股递延纳税事项
             self.driver.execute_script("$('input[name=sfgxjsqy][value=\"N\"]').prop('checked',true);$('input[name=sfkjxzxqy][value=\"N\"]').prop('checked',true);$('input[name=sffsjsrgdynssx][value=\"N\"]').prop('checked',true);")
             # 从业人数
@@ -1531,23 +1620,23 @@ class TaxSite:
             self.driver.switch_to.default_content()
             self.driver.execute_script("shenbao();")
 
-        # 附加税
-        elif bddm == 'FJSF001':
-            self.insert_log('附加税申报')
-            self.driver.get(tax_url)
-            # parse_sb_data = self.driver.execute_script("return $('#mxTable').table('getData');")
-            htool.driver_close_alert(self.driver,3)
-            # self.driver.execute_script("$('input[name=ybzzs]').val(2525).trigger('change');")
-            # 测试数据，需要修改正确数据
-            self.driver.execute_script('var iframe = $("#iframes", parent.document).find("iframe[name=main]")[0];var fc = iframe.contentWindow.document;$(fc).find(\'input[name=ybzzs]\').val("500.00");')
-            self.iframe = self.driver.find_element_by_xpath('//div[@id="iframes"]/iframe[@name = "main"]')
-            self.driver.switch_to.frame(self.iframe)
-            # 触发iframe input修改操作
-            for i in range(3):
-                self.driver.find_element_by_xpath('//div[@id="mxTable"]//tbody/tr[%s]//input[@name="ybzzs"]' % (i+1)).send_keys('0')
+        # # 附加税
+        # elif bddm == 'FJSF001':
+        #     self.insert_log('附加税申报')
+        #     self.driver.get(tax_url)
+        #     # parse_sb_data = self.driver.execute_script("return $('#mxTable').table('getData');")
+        #     htool.driver_close_alert(self.driver,3)
+        #     # self.driver.execute_script("$('input[name=ybzzs]').val(2525).trigger('change');")
+        #     # 测试数据，需要修改正确数据
+        #     self.driver.execute_script('var iframe = $("#iframes", parent.document).find("iframe[name=main]")[0];var fc = iframe.contentWindow.document;$(fc).find(\'input[name=ybzzs]\').val("500.00");')
+        #     self.iframe = self.driver.find_element_by_xpath('//div[@id="iframes"]/iframe[@name = "main"]')
+        #     self.driver.switch_to.frame(self.iframe)
+        #     # 触发iframe input修改操作
+        #     for i in range(3):
+        #         self.driver.find_element_by_xpath('//div[@id="mxTable"]//tbody/tr[%s]//input[@name="ybzzs"]' % (i+1)).send_keys('0')
 
-            self.driver.switch_to.default_content()
-            self.driver.execute_script("shenbao();")
+        #     self.driver.switch_to.default_content()
+        #     self.driver.execute_script("shenbao();")
 
         # 印花税
         elif bddm == 'YHS0794':
@@ -1562,8 +1651,15 @@ class TaxSite:
                 htool.driver_close_alert(self.driver,3)
                 parse_sb_data = self.driver.execute_script("return $('#mxTable').table('getData');")
 
-                pmdm = ""
-                sr_total = 1571539.54
+                # 报税所需数据
+                sb_data = self.get_tax_sb_data(tax_info)
+                if 'pmdm' not in sb_data or 'shouru' not in sb_data:
+                    print('印花税获取报税数据失败')
+                    return False
+
+                pmdm = sb_data['pmdm']
+                sr_total = sb_data['shouru']
+
                 # 是否能匹配上
                 pm_match = False
                 # 其它匹配项
@@ -1572,11 +1668,6 @@ class TaxSite:
                 for sb_item in parse_sb_data:
                     if sb_item['zspmDm'] == pmdm:
                         pm_match = True
-                        # 报税所需数据
-                        sb_data = self.get_tax_sb_data(tax_info)
-                        if len(sb_data) == 0:
-                            print('无报税数据')
-                            return False
                         self.driver.execute_script("$('.sbt input[name=jsje]').eq(%s).val(%s).trigger('change');" % (p_index,sr_total))
                     # 选择不是资金账簿的作为备选 
                     elif sb_item['zspmDm'] != "101110501":
@@ -1984,7 +2075,7 @@ class TaxSite:
         print('查询代开发票数据',dk_val)            
         return dk_val
 
-    # 获取增值税报税所需数据   
+    # 获取报税所需数据   
     def get_tax_sb_data(self,post_data):
         htool = HTool()
         export_data = htool.post_data(self.tax_export_data_url,post_data,self.driver)

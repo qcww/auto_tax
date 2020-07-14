@@ -775,4 +775,31 @@ def match_fl_val(val_1,val_2):
     print(round(float(val_1.replace(',','')),2) , round(float(val_2.replace(',','')),2))
     return round(float(val_1.replace(',','')),2) == round(float(val_2.replace(',','')),2)
 
-print(match_fl_val('1640.17','16,460.17'))    
+print(match_fl_val('1640.17','16,460.17'))
+
+
+Array
+(
+    [advance_payment] => 7645.62     # 本期预缴总额
+    [prepay_datas] => Array
+        (
+            [zzs_deductible] => 7281.55   # 本期预缴增值税税额
+            [jyffa_deductible] => 109.22   # 本期预缴教育费附加税额
+            [cswhjss_deductible] => 182.04      # 本期预缴城市维护建设税税额
+            [dfjyfa_deductible] => 72.81        # 本期预缴地方教育附加税额
+            [yhs_deductible] => 0     # 本期预缴印花税税额
+            [sljj_deductible] => 0     # 本期预缴水利基金税额
+        )
+
+    [revenue_datas] => Array
+        (
+            [zzs_deductible] => 7281.55    # 本期可抵扣增值税税额
+            [jyffa_deductible] => 109.22        # 本期可抵扣教育费附加税额
+            [cswhjss_deductible] => 182.04   # 本期可抵扣城市维护建设税税额
+            [dfjyfa_deductible] => 72.81    # 本期可抵扣地方教育附加税额
+            [yhs_deductible] => 0     # 本期可抵扣印花税税额
+            [sljj_deductible] => 0      # 本期可抵扣水利基金税额
+        )
+
+    [all_deductible] => 7645.62     # 本期实际缴纳【汇总额】
+)

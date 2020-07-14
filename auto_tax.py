@@ -254,7 +254,7 @@ class Ep(ui.MainMenu):
         # try:
         if corp_data == None:
             return False        
-        corpid = self.tax_site.set_corp(corp_data)
+        self.tax_site.set_corp(corp_data)
 
         self.tax_site.open_browser()
         login_res = self.tax_site.login()
@@ -387,8 +387,9 @@ class Ep(ui.MainMenu):
     def remove_task(self):
         if len(self.task_arr) > 0:
             self.task_arr.pop(self.running_index)
+            self.task_list.Delete(self.running_index)
             self.running_index -= 1
-            self.task_list.Delete(0)
+            
 
     def post_link(self,link,post_data):
         headers = {'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/52.0.2743.116 Safari/537.36 Edge/15.15063'}
