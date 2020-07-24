@@ -76,7 +76,7 @@ class HTool(HTMLParser):
         return _cookie    
 
     # 使用截屏方式保存验证码
-    def save_ercode_img(self,driver,xpath):
+    def save_ercode_img(self,driver,xpath,convert = 1):
         element = driver.find_element_by_xpath(xpath)
 
         save_name = ''.join(random.sample('zyxwvutsrqponmlkjihgfedcba',5))+'.png'
@@ -91,7 +91,11 @@ class HTool(HTMLParser):
         with open(save_name, "wb") as f:
             for chunk in img_ret.iter_content(chunk_size=512):
                 f.write(chunk)
-        self.convert_img(save_name)
+        if convert == 1:
+            self.convert_img(save_name)
+        elif convert == 2:
+            pass
+            self.convert_xnw_img(save_name)
         return save_name
 
     def convert_img(self,save_name):
@@ -104,6 +108,46 @@ class HTool(HTMLParser):
                 else:
                     pixels[i,j] = (0, 0, 0)
         img.save(save_name)
+
+    def convert_xnw_img(self,save_name):
+        img = Image.open(save_name)
+        pixels = img.load()
+        fix_pix = []
+        for i in range(img.size[0]):
+            for j in range(img.size[1]):
+                if (pixels[i,j][0] > 200 and pixels[i,j][1] < 100 and pixels[i,j][2] < 100):
+                    pixels[i,j] = (0, 0, 0)
+                else:
+                    # 判断附近是否有红点，有的话不去
+                    rm = self.recheck_pixel(img,pixels,i,j)
+                    if rm == True:
+                        fix_pix.append((i,j))
+                        # pixels[i,j] = (0, 0, 0)
+                    else:
+                        pixels[i,j] = (254, 255, 255)   
+        # print(fix_pix)
+        for fix in fix_pix:
+            i,j = fix
+            # print(i,j)
+            pixels[i,j] = (0, 0, 0)
+
+        img.save(save_name)
+
+    def recheck_pixel(self,img,pixels,i,j):
+        if j < img.size[1] * 0.2 or j > img.size[1] * 0.8:
+            return False
+
+        try:
+            for f in range(5):
+                if pixels[i,j+f] == (0, 0, 0) or pixels[i,j-f] == (0, 0, 0):
+                    return True
+        except:
+            print(i,j+1,j-1)
+            # print('i,j',i,j+1,j-1,img.size[0],img.size[1])
+            pass
+
+
+        return False
 
     # 默认按三个月拆分
     def split_time(self,sbrqq,sbrqz,period = 3):
@@ -129,10 +173,10 @@ class HTool(HTMLParser):
         file = {'image':(img_path, file_handle, 'image/png')}
         r = requests.post(url=self.parse_code_img_url, headers=headers,files=file)
         file_handle.close()
-        try:
-            os.remove(img_path)
-        except(FileNotFoundError):
-            print("文件不存在")
+        # try:
+        #     os.remove(img_path)
+        # except(FileNotFoundError):
+        #     print("文件不存在")
         return json.loads(r.text)
 
 	# 获取浏览器cookie resquest post请求获取数据

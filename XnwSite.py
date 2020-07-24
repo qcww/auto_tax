@@ -18,9 +18,8 @@ from selenium.webdriver.chrome.options import Options
 from HTool import HTool
 from bs4 import BeautifulSoup
 
-
-#安徽社保网站
-class SbExport:
+# 信诺网
+class Xnw:
 
     def __init__(self,taxObj):
         base_dir = os.getcwd()
@@ -28,7 +27,7 @@ class SbExport:
         self.htool = HTool()
         config = self.htool.rt_config()
 
-        self.login_url = config['link']['ah_sb_login_url']
+        self.login_url = 'https://www.nuocity.com/xnw_user_ssoservice/login?service=https%3A%2F%2Fwww.nuocity.com%2Fxnw%2Fzz%2Flogin.jspx%3FreturnUrl%3Dhttps%253A%252F%252Fwww.nuocity.com%252F%26locale%3Dzh_CN'
         self.ah_sb_hd_url = config['link']['ah_sb_hd_url']
         # 社保账号密码
         self.si_account_ret_url = config['link']['si_account_ret_url']
@@ -37,35 +36,14 @@ class SbExport:
 
      #登录
     def login(self,post_data,corpid):
-        # 获取社保账号密码
-        get_acc_ret = self.htool.post_data(self.si_account_ret_url,{'corpid':corpid})
-        sb_account = sb_pwd = ''
-        post_data['ret'] = False
-        print('获取社保账号密码结果',get_acc_ret.text)
-        if get_acc_ret.status_code == 200:
-            tax_json = json.loads(get_acc_ret.text)
-            if 'shebao_number' not in tax_json or 'shebao_pwd' not in tax_json or tax_json['shebao_number'] == '' or tax_json['shebao_pwd'] == '':
-                post_data['comp_status'] = 0
-                post_data['content'] = '社保账号或密码不正确，请及时修改'
-                post_ret = self.htool.post_data(self.taxObj.tax_password_url,{'corpid':self.taxObj.corpid,'shebao_pwd':'0','msg':'报税密码错误，请及时修改'})
-                print('密码错误上传结果',post_ret)
-                self.driver.quit()
-                return post_data
-            sb_account = tax_json['shebao_number']
-            sb_pwd = tax_json['shebao_pwd']
-        else:
-            post_data['content'] = '获取社保账号密码时发生错误'
-            self.htool.post_data(self.taxObj.tax_password_url,{'corpid':self.taxObj.corpid,'shebao_pwd':'0','msg':'报税密码错误，请及时修改'})
-            self.driver.quit()
-            return post_data
-
-        self.sb_account = sb_account
-        self.sb_pwd = sb_pwd
         self.driver.get(self.login_url)
         #跳过引导
-        sleep(3)
-        # 尝试登录6次
-        ret = self.login_action(3)
+        sleep(1)
+        # self.driver.execute_script("jumpToFpdk()")
+        # sleep(1)
+        # self.driver.execute_script("$('.layui-layer-dialog .layui-layer-btn a:eq(0)').click()")
+        # 尝试登录
+        ret = self.login_action(6)
         post_data['ret'] = ret
         return post_data
 
@@ -78,55 +56,54 @@ class SbExport:
             driver.quit()
             return False
         login_times -= 1
+        self.driver.execute_script("$('.tab li:eq(1)').click()")
         
         # try:
-        tax_code_input = driver.find_element_by_id("username")
-        pwd_input = driver.find_element_by_id("password")
-        verify_code = driver.find_element_by_xpath("//form[@id='form1']//input[@name='verify']")
-        tax_code_input.send_keys(self.sb_account)
-        pwd_input.send_keys(self.sb_pwd)
+        self.driver.execute_script("$('#username2').val('%s')" % self.taxObj.credit_code)
+        self.driver.execute_script("$('#password2').val('%s')" % self.taxObj.pwd)
         parse_code = self.parse_action()
-        verify_code.send_keys(parse_code)
-        # print('解析结果',parse_code)
-        driver.execute_script('login()')
+        self.driver.execute_script("$('#j_captcha_response2').val('%s')" % parse_code)
+        print('解析结果',parse_code)
+        driver.execute_script("$('#qyboxnr input[name=submit]').click()")
         sleep(3)
-        curr_link = driver.current_url
+        # curr_link = driver.current_url
         # print('当前链接',curr_link)
         # 判断是否有密码错误的提示框出来 
         try:
-            if 'companyInfo' not in curr_link:
-                err_msg = driver.find_element_by_xpath("//form[@id='form1']/div[@class='wsbsLoginBg']/div/label").text
-                print('错误信息',err_msg)
-                if '密码不正确' in err_msg or '用户名不存在' in err_msg or '没有信息' in err_msg:
+            pass_err = driver.find_element_by_class_name("layui-layer-dialog")
+            if pass_err:
+                # print('pass_err',pass_err)
+                err_msg = pass_err.find_element_by_xpath("./div[@class='layui-layer-content layui-layer-padding']").text
+                # print('错误信息',err_msg)
+                if '用户名格式不正确' in err_msg or '用户名不能为空' in err_msg or '密码不能为空' in err_msg or '您输入的用户名或密码不正确' in err_msg:
                     print('账号密码错误')
-                    self.htool.post_data(self.taxObj.tax_password_url,{'corpid':self.taxObj.corpid,'shebao_pwd':'0','msg':err_msg})
+                    self.htool.post_data(self.taxObj.tax_password_url,{'corpid':self.taxObj.corpid,'pwd':'0','msg':err_msg})
                     driver.quit()
                     return False
                 # 如果是计算结果错误,可重试
-                if '验证码有误' in err_msg:
-                    self.driver.execute_script("window.location.reload()")
+                if '图片验证码不正确' in err_msg:
                     print("验证码识别结果不正确，请等待")
                     # self.taxObj.remove_task()
+                driver.execute_script("layer.closeAll()")
                 return self.login_action(login_times)
             else:
                 return True
-        except :
-            print('登录解析时发生错误')
+        except Exception as e:
+            print('登录解析时发生错误',e)
         return False
 
     # 解析验证码，直到获取到一个结果为止        
     def parse_action(self):
         #保存验证码图片到本地 并识别
         htool = HTool()
-        local_img = htool.save_ercode_img(self.driver,"//img[@id='image']")
+        local_img = htool.save_ercode_img(self.driver,"//img[@id='vdImg2']",2)
         res = htool.send_img(local_img)
 
-        if res['parse']:
-            print('')
+        if res['parse'] != '' and len(str(res['parse'])) == 4:
             return res['parse']
         else:
             print('解析验证码失败，重新解析')
-            sleep(2)
+            sleep(1)
             return self.parse_action()
 
 

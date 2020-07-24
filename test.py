@@ -16,7 +16,7 @@ from PIL import Image, ImageEnhance
 
 class Test:
     def __init__(self):
-        self._cookie = 'UM_distinctid=171bae57eae353-08300d7c6a0d86-3a36510f-1fa400-171bae57eafea; aisino-never-guide=Y; CNZZDATA1277373975=269526059-1587975113-%7C1593649685; aisino-wsbs-session=b2f762f6-4d77-419f-8a24-a01384ab1b0e; JSESSIONID=B7AEC1F61D979DE85DAF1BC280F6B9A5'
+        self._cookie = 'JSESSIONID=6264082F7E266BD0B84DD5E1FD3832CC'
         # corp_list = "55||安徽一半一伴咖啡品牌管理有限公司 ||91340100094822207C||wcy123456||2019-08-01||2019-12-01||5"
         # corp_list = "64||安徽百胜医疗管理有限公司 ||91340100094822207C||wcy123456||2019-01-01||2019-12-07||5"
         corp_list = "419||合肥海博一品展示用品有限公司||91340121348752721T||wcy123456||2020-05-01||2020-06-06||5"
@@ -39,6 +39,8 @@ class Test:
         self.agent_invoice_url = self.config['link']['agent_invoice_url']
         self.agent_invoice_detail_url = self.config['link']['agent_invoice_detail_url']
         self.agent_list_url = self.config['link']['agent_list_url']
+        self.sb_jk_list_url = self.config['link']['sb_jk_list_url']
+        self.sb_jk_detail_upload_url = self.config['link']['sb_jk_detail_upload_url']
         
 
     # 获取扣款列表及网银列表
@@ -461,8 +463,7 @@ class Test:
         if post_res.status_code != 200 and retry > 0:
             retry -= 1
             sleep(5 - retry)
-            print(post_res.text)
-            return self.post_data(url,data,driver,header_add,retry)
+            return self.post_data(url,data,header_add,retry)
         return post_res
 
     # 使用driver get获取数据
@@ -736,9 +737,67 @@ class Test:
 
 
     def insert_log(self,msg):
-        print(msg)    
+        print(msg)
 
-test = Test()
+    def tax_si_upload(self,page=0,page_size = 20000,tax_data = []):
+        # sbrqq = time.strftime("%Y%m",time.localtime())
+        # sbrqz = time.strftime("%Y%m",time.localtime())
+        sbrqq = '202007'
+        sbrqz = '202007'
+        data = {'qsrq00': sbrqq,'jzrq00': sbrqz,'aac002': '','aac003':'','aae140':'','aae078':'','pageIndex':page,'pageSize':page_size}
+        
+        try:
+            sb_data = self.post_data(self.sb_jk_list_url,data)
+            tax_json = json.loads(sb_data.text)
+            if tax_json['data'] != None:
+                # print('获取到数据',tax_json,len(tax_json['data']))
+                tax_data.extend(tax_json['data'])
+                if tax_json['total'] > page_size:
+                    print('继续获取下一页数据')
+                    return self.tax_si_upload(page+1,page_size,tax_data)
+             
+        except Exception as e:
+            print(e)
+
+        # 数据归类并上传
+        if len(tax_data) > 0 and (tax_json['data'] == None or tax_json['total'] <= page_size):
+        # if len(tax_data) > 0:
+            self.sy_tax_si(tax_data)
+
+    def sy_tax_si(self,tax_data):
+        gl_data = {}
+        for it in tax_data:
+            if it['aae002'] not in gl_data:
+                gl_data[it['aae002']] = [it]
+            else:
+                gl_data[it['aae002']].append(it)
+        # 数据继续归类，上传
+        for gl in gl_data:
+            rows = gl_data[gl]
+            # 按照人汇总
+            users = {}
+            post_user = []
+            kk_date = ''
+            for sig in rows:
+                user_sign = sig['aae003']+sig['aac002']
+                if user_sign not in users:
+                    kk_date = sig['aae002']
+                    users[user_sign] = {"data_id":sig['aaz288']+sig['aac001'],"kk_date":sig['aae002'],"identify":sig['aac002'],"type":sig['aaa115'],"type_name":sig['aaa115_mc'],"period":sig['aae003'],"uname":sig['aac003'],"total_money":float(sig['aae022'])+float(sig['aae020']),"gr":float(sig['aae022']),"dw":float(sig['aae020'])}
+                else:
+                    users[user_sign]["gr"] += float(sig['aae022'])
+                    users[user_sign]["dw"] += float(sig['aae020'])
+                    users[user_sign]["total_money"] += float(sig['aae022']) + float(sig['aae020'])
+            for po in users:
+                staff = users[po]
+                staff['gr'] = "%.2f" % staff['gr']
+                staff['dw'] = "%.2f" % staff['dw']
+                staff['total_money'] = "%.2f" % staff['total_money']
+                post_user.append(staff)
+            sb_ret = self.post_data(self.sb_jk_detail_upload_url,{"post_user":json.dumps(post_user),"corpid":self.corpid,"kk_date":kk_date})
+            print("sb_ret",sb_ret.text)
+
+# test = Test()
+# test.tax_si_upload()
 # res = test.get_sb_detail()
 # print(res)
 # test.get_tax_kk_list()
@@ -758,48 +817,32 @@ test = Test()
 # print(ss)
 # tax = test.ready_tax_info()
 # print(tax)
-
-# 税务局代开发票金额查询
-# test.dkfp_bs_search()
-
-# sb_site = Export()
-# sb_site.open_browser()
-# login_ret = sb_site.login()
-# if login_ret == False:
-#     print('登录失败')
-# sb_site.get_sb_data()
-
-def match_fl_val(val_1,val_2):
-    val_1 = str(val_1)
-    val_2 = str(val_2)
-    print(round(float(val_1.replace(',','')),2) , round(float(val_2.replace(',','')),2))
-    return round(float(val_1.replace(',','')),2) == round(float(val_2.replace(',','')),2)
-
-print(match_fl_val('1640.17','16,460.17'))
+htool = HTool()
+htool.convert_xnw_img('cqgkr.png')
 
 
-Array
-(
-    [advance_payment] => 7645.62     # 本期预缴总额
-    [prepay_datas] => Array
-        (
-            [zzs_deductible] => 7281.55   # 本期预缴增值税税额
-            [jyffa_deductible] => 109.22   # 本期预缴教育费附加税额
-            [cswhjss_deductible] => 182.04      # 本期预缴城市维护建设税税额
-            [dfjyfa_deductible] => 72.81        # 本期预缴地方教育附加税额
-            [yhs_deductible] => 0     # 本期预缴印花税税额
-            [sljj_deductible] => 0     # 本期预缴水利基金税额
-        )
+# Array
+# (
+#     [advance_payment] => 7645.62     # 本期预缴总额
+#     [prepay_datas] => Array
+#         (
+#             [zzs_deductible] => 7281.55   # 本期预缴增值税税额
+#             [jyffa_deductible] => 109.22   # 本期预缴教育费附加税额
+#             [cswhjss_deductible] => 182.04      # 本期预缴城市维护建设税税额
+#             [dfjyfa_deductible] => 72.81        # 本期预缴地方教育附加税额
+#             [yhs_deductible] => 0     # 本期预缴印花税税额
+#             [sljj_deductible] => 0     # 本期预缴水利基金税额
+#         )
 
-    [revenue_datas] => Array
-        (
-            [zzs_deductible] => 7281.55    # 本期可抵扣增值税税额
-            [jyffa_deductible] => 109.22        # 本期可抵扣教育费附加税额
-            [cswhjss_deductible] => 182.04   # 本期可抵扣城市维护建设税税额
-            [dfjyfa_deductible] => 72.81    # 本期可抵扣地方教育附加税额
-            [yhs_deductible] => 0     # 本期可抵扣印花税税额
-            [sljj_deductible] => 0      # 本期可抵扣水利基金税额
-        )
+#     [revenue_datas] => Array
+#         (
+#             [zzs_deductible] => 7281.55    # 本期可抵扣增值税税额
+#             [jyffa_deductible] => 109.22        # 本期可抵扣教育费附加税额
+#             [cswhjss_deductible] => 182.04   # 本期可抵扣城市维护建设税税额
+#             [dfjyfa_deductible] => 72.81    # 本期可抵扣地方教育附加税额
+#             [yhs_deductible] => 0     # 本期可抵扣印花税税额
+#             [sljj_deductible] => 0      # 本期可抵扣水利基金税额
+#         )
 
-    [all_deductible] => 7645.62     # 本期实际缴纳【汇总额】
-)
+#     [all_deductible] => 7645.62     # 本期实际缴纳【汇总额】
+# )

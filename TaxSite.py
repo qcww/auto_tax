@@ -75,10 +75,15 @@ class TaxSite:
         self.bundle_kk_status_url = config['link']['bundle_kk_status_url']
         # 待上传税务报表客户
         self.ready_sw_url = config['link']['ready_sw_url']
-        # 社保账号密码
-        self.si_account_ret_url = config['link']['si_account_ret_url']
+
         # 报税，社保申报结果上传
         self.sb_auto_ret_url = config['link']['sb_auto_ret_url']
+        # 社保网站缴纳详情接口
+        self.sb_jk_list_url = config['link']['sb_jk_list_url']
+        # 社保待上传详情信息
+        self.ready_sb_jk_detail_url = config['link']['ready_sb_jk_detail_url']
+        # 社保详情上传接口
+        self.sb_jk_detail_upload_url = config['link']['sb_jk_detail_upload_url']
 
         # 需要获取代开具发票的企业
         self.agent_ready_url = config['link']['agent_ready_url']
@@ -149,6 +154,7 @@ class TaxSite:
         driver = self.driver
         htool = HTool()
         if login_times == 0:
+            self.taxObj.remove_task()
             htool.post_data(self.tax_password_url,{'corpid':self.corpid,'pwd':'1','msg':'登录失败次数过多'})
             driver.quit()
             return False
@@ -179,10 +185,11 @@ class TaxSite:
             login_btn_click.perform()
             sleep(4)
             # 判断是否有密码错误的提示框出来 
-            pass_err = driver.find_element_by_id("layui-layer1")
+            pass_err = driver.find_element_by_class_name("layui-layer-dialog")
             if pass_err:
-                err_msg = driver.find_element_by_xpath("//div[@id='layui-layer1']/div[@class='layui-layer-content']").text
-                if '您的密码已输错' in err_msg or '密码输入错误' in err_msg or '请输入密码' in err_msg or '企业户账号不存在' in err_msg:
+                err_msg = pass_err.find_element_by_xpath("./div[@class='layui-layer-content']").text
+                print(err_msg)
+                if '您的密码已输错' in err_msg or '密码输入错误' in err_msg or '锁定' in err_msg or '请输入密码' in err_msg or '企业户账号不存在' in err_msg:
                     self.insert_log("报税密码错误，请及时修改")
                     # 密码错误
                     htool.post_data(self.tax_password_url,{'corpid':self.corpid,'pwd':'0','msg':'报税密码错误，请及时修改'})
@@ -196,7 +203,6 @@ class TaxSite:
                     return False
                 # 如果是计算结果错误,可重试
                 if '结果输入有误' in err_msg:
-                    self.driver.execute_script("window.location.reload()")
                     self.insert_log("验证码识别结果不正确，请等待")
                     # self.taxObj.remove_task()
         except Exception as e:
@@ -286,10 +292,16 @@ class TaxSite:
                 self.tax_sb()
                 self.social_insurance()
             if a == '10':
-                self.insert_log('获取代开具发票')
-                self.dkfp_search()
-               
-        self.driver.quit()        
+                self.insert_log('获取税务局代开具发票')
+                self.sw_dkfp_search()
+            if a == '11':
+                self.insert_log('获取社保信息')
+                self.tax_si_upload()
+            if a == '12':
+                self.insert_log('获取信诺网代开发票')
+                self.xnw_dkfp_search()
+        print('执行任务结束',a)        
+        self.driver.quit()
 
     # 公司登记信息
     def get_comp_info(self):
@@ -312,8 +324,8 @@ class TaxSite:
                 syn_res = htool.post_data(self.tax_corp_info_url,{'info':str(rt_dict),'corpid':self.corpid})
                 if syn_res.status_code == 200:
                     ret_msg = '获取登记信息成功'
-        except:
-            pass
+        except Exception as e:
+            print(e)
         return ret_msg
 
     # 税费（种）认定信息 
@@ -447,7 +459,8 @@ class TaxSite:
 
                     for i in ss_data[ss_item]:
                         qmldse += float(i['qmldse'])
-                    res = htool.post_data(self.tax_update_url,{"corpid":self.corpid,'period':period,'qmldse':qmldse,'fill_date':fill_date,"msg":"自动更新[所属期：%s - 已申报税收数据]完成 期末留抵税额:%s" % (period,qmldse),"data":json.dumps(ss_data[ss_item])})
+                    # print(ss_data[ss_item])
+                    res = htool.post_data(self.tax_update_url,{"corpid":self.corpid,'period':period,'tax_type':0,'qmldse':qmldse,'fill_date':fill_date,"msg":"自动更新[所属期：%s - 已申报税收数据]完成 期末留抵税额:%s" % (period,qmldse),"data":json.dumps(ss_data[ss_item])})
                     print('申报结果',res.text)
                     if res.status_code == 200:
                         res_text = json.loads(res.text)
@@ -465,7 +478,7 @@ class TaxSite:
             return False
         else:
             print(sb_data.text)
-            htool.post_data(self.tax_update_url,{"corpid":self.corpid,'period':period,'fill_date':self.sbrqz,'qmldse':qmldse,"msg":"从税务局网站获取[%s-%s]已申报数据失败" % (self.sbrqq,self.sbrqz),"data":'[]'})
+            htool.post_data(self.tax_update_url,{"corpid":self.corpid,'period':period,'tax_type':0,'fill_date':self.sbrqz,'qmldse':qmldse,"msg":"从税务局网站获取[%s-%s]已申报数据失败" % (self.sbrqq,self.sbrqz),"data":'[]'})
         self.insert_log(ret_msg)
         
         return False
@@ -664,8 +677,8 @@ class TaxSite:
         for sb_period in sb_list:
             sb_list[sb_period]['json_detail'] = '['+','.join(sb_list[sb_period]['json_detail'])+']'
             # print(sb_list[sb_period])
-            print('上传社保结果')
-            res = htool.post_data(self.tax_update_url,{"corpid":self.corpid,'period':sb_list[sb_period]['period'],'fill_date':sb_list[sb_period]['fill_date'],"msg":"自动更新[所属期：%s - 已申报社保数据]完成" % sb_list[sb_period]['period'],"data":json.dumps([sb_list[sb_period]])})
+            print('上传社保结果',[sb_list[sb_period]])
+            res = htool.post_data(self.tax_update_url,{"corpid":self.corpid,'period':sb_list[sb_period]['period'],'tax_type':1,'fill_date':sb_list[sb_period]['fill_date'],"msg":"自动更新[所属期：%s - 已申报社保数据]完成" % sb_list[sb_period]['period'],"data":json.dumps([sb_list[sb_period]])})
             if res.status_code == 200:
                 try:
                     res_text = json.loads(res.text)
@@ -732,7 +745,6 @@ class TaxSite:
                 except:
                     return ret_msg,sb_list
             else:
-                self.insert_log('请求社保接口出错',sb_data.text)
                 return ret_msg,sb_list
 
     # 解析社保详情
@@ -883,7 +895,7 @@ class TaxSite:
         self.driver.get(self.sb_kk_page_url)
         sb_kk_ret = self.do_sb_kk_action(bank_num)
         htool.post_data(self.tax_kk_sb_url,sb_kk_ret)
-        print("社保扣款提交结果",sb_kk_ret)
+        # print("社保扣款提交结果",sb_kk_ret)
 
 
         jkrqq = time.strftime("%Y-%m-01",time.localtime())
@@ -903,7 +915,7 @@ class TaxSite:
         if kk_data.status_code == 200:
             kk_json = json.loads(kk_data.text)
             # print('社保扣款',kk_json)
-            print('社保信息',kk_json)
+            # print('社保信息',kk_json)
             kk_item_num = len(kk_json['data'])
         else:
             kk_post_data['msg'] = '扣款失败,获取社保费缴纳信息时发生错误'
@@ -1157,37 +1169,45 @@ class TaxSite:
         else:
             return {}
 
+    # 信诺网代开发票查询
+    def xnw_dkfp_search(self):
+        pass 
+
     # 代开发票查询
-    def dkfp_search(self):
+    def sw_dkfp_search(self):
         htool = HTool()
-        kjrq = time.strftime("%Y-%m-01",time.localtime())
-        data = {'kjrqq': '2020-01-01','kjrqz': kjrq}
+        # kjrq = time.strftime("%Y-%m-01",time.localtime())
+
+        kjrqq,kjrqz = htool.month_get(1)
+        data = {'kjrqq': kjrqq,'kjrqz': kjrqz}
         ret_msg = '获取代开发票数据失败'
         # try:
         # 发票开具信息查询
+        self.taxObj.remove_task()
         dkfp_ret = htool.post_data(self.dkfp_data_url,data,self.driver)
-       
+        print('代开发票日期参数',data)   
         if dkfp_ret.status_code == 200:
             dkfp_data = json.loads(dkfp_ret.text)
-            htool.post_data(self.agent_invoice_url,{"corpid":self.corpid,"msg":"自动更新开票信息成功，获取 %s 条数据" % len(dkfp_data['data']),"rows_data":json.dumps(dkfp_data['data'])})
-            print("代开发票",dkfp_data['data'])
+            print('代开票开具数据',dkfp_data)
+            kj_ret = htool.post_data(self.agent_invoice_url,{"corpid":self.corpid,"msg":"已开具发票信息，共获取 %s 条" % len(dkfp_data['data']),"rows_data":json.dumps(dkfp_data['data'])})
+            print("代开发票上传",kj_ret.text)
             fp_detail = self.dkfp_detail(1)
             # print(fp_detail)
-            post_fp = htool.post_data(self.agent_invoice_detail_url,{"corpid":self.corpid,"msg":"自动更新发票申请信息成功,获取 %s 条数据" % len(fp_detail),"rows_data":json.dumps(fp_detail)})
-            print("发票详情上传",post_fp.text)
+            post_fp = htool.post_data(self.agent_invoice_detail_url,{"corpid":self.corpid,"msg":"发票办理信息,共获取： %s 条" % len(fp_detail),"rows_data":json.dumps(fp_detail)})
+            print("发票详情上传",json.dumps(fp_detail))
             # except:
             #     return ret_msg
-            self.taxObj.remove_task()
         else:
             print(ret_msg)
 
     def dkfp_detail(self,pageNum):
         # 发票申请
-        data = {'pageSize': '200','pageNum': pageNum,'formType':'A02'}
+        data = {'pageSize': '2000','pageNum': pageNum,'formType':'A02'}
         # ret_msg = '获取代开发票申请数据失败'
         htool = HTool()
         # try:
         dkfp_data = htool.post_data(self.dkfp_detail_url,data,self.driver)
+        # print('获取到发票申请信息',dkfp_data.text)
         if dkfp_data.status_code == 200:
             dkfp_json = json.loads(dkfp_data.text)
             # print(dkfp_json)
@@ -1195,10 +1215,10 @@ class TaxSite:
                 ret_json = []
                 for dk in dkfp_json['data']['rows']:
                     app_time_arr = dk['createtime'].split('-')
-                    if float(app_time_arr[0]) < 2020:
+                    if int(app_time_arr[0]) < 2020:
                         continue
-                    # 只获取状态为已办理的数据
-                    if dk['stacode'] != '13':
+                    # 过滤部分异常状态数据
+                    if dk['stacode'] == '18' or dk['stacode'] == '3':
                         continue
 
                     d_link = self.zzfp_detail_url + dk['data_ID']
@@ -1335,6 +1355,15 @@ class TaxSite:
         else:
             return {}
 
+    # 获取未上传社保缴纳信息企业
+    def get_sb_jk_data(self):
+        htool = HTool()
+        post_res = htool.get_data(self.ready_sb_jk_detail_url)
+        if post_res.status_code == 200:
+            return json.loads(post_res.text)
+        else:
+            return {}
+
     # 获取需要上传报税数据企业
     def get_sw_sb_data(self):
         htool = HTool()
@@ -1368,30 +1397,14 @@ class TaxSite:
             else:
                 return self.check_sb_result(post_data)
 
-        # 获取社保账号密码
-        get_acc_ret = htool.post_data(self.si_account_ret_url,{'corpid':self.corpid})
-        sb_account = sb_pwd = ''
-        print('获取社保账号密码结果',get_acc_ret.text)
-        if get_acc_ret.status_code == 200:
-            tax_json = json.loads(get_acc_ret.text)
-            if 'shebao_number' not in tax_json or 'shebao_pwd' not in tax_json:
-                post_data['comp_status'] = 2
-                post_data['content'] = '社保账号或密码不正确，请及时修改'
-                return self.check_sb_result(post_data)
-            sb_account = tax_json['shebao_number']
-            sb_pwd = tax_json['shebao_pwd']
-        else:
-            post_data['content'] = '获取社保账号密码时发生错误'
-            return self.check_sb_result(post_data)
         # sb_account = 499096
         # sb_pwd = 499096
         # 登录社保网站核定金额
         sb_site = SbExport(self)
-        login_ret = sb_site.login(sb_account,sb_pwd)
-        if login_ret == False:
-            post_data['content'] = '登录社保网站失败'
-            return self.check_sb_result(post_data)
-        # 通过社保局核定的金额 
+        login_ret = sb_site.login(post_data,self.corpid)
+        if login_ret['ret'] == False:
+            return self.check_sb_result(login_ret)
+        # 检查社保局核定的金额 
         hd_je = sb_site.get_sb_data()
         print('核定社保金额',hd_je)
         self.driver.get(si_url)
@@ -1429,7 +1442,7 @@ class TaxSite:
             # 延迟几秒时间，避免未查询到数据问题
             sleep(3)
             sb_ret = self.get_sb_detail(False)
-            print('最终上传社保结果',sb_ret)
+            # print('最终上传社保结果',sb_ret)
             if sb_ret == True:
                 post_data['content'] = '社保已申报并上传成功'
                 post_data['sb_status'] = 1
@@ -1445,7 +1458,68 @@ class TaxSite:
             print('上传报税结果错误',export_data.text)
         else:
             self.insert_log('成功提交社保申报结果')
-        print('社保接口提交数据',post_data)    
+        # print('社保接口提交数据',post_data)
+
+
+    def tax_si_upload(self,page=0,page_size = 20000,tax_data = []):
+        # sbrqq = time.strftime("%Y%m",time.localtime())
+        # sbrqz = time.strftime("%Y%m",time.localtime())
+        print('社保数据获取',self.sbrqq,self.sbrqz)
+        data = {'qsrq00': self.sbrqq,'jzrq00': self.sbrqz,'aac002': '','aac003':'','aae140':'','aae078':'','pageIndex':page,'pageSize':page_size}
+        htool = HTool()
+        try:
+            sb_data = htool.post_data(self.sb_jk_list_url,data,self.driver)
+            tax_json = json.loads(sb_data.text)
+            if tax_json['data'] != None:
+                # print('获取到数据',tax_json,len(tax_json['data']))
+                tax_data.extend(tax_json['data'])
+                if tax_json['total'] > page_size:
+                    print('继续获取下一页数据')
+                    return self.tax_si_upload(page+1,page_size,tax_data)
+             
+        except Exception as e:
+            print(e)
+
+        # print('获取结果',tax_json['data'])
+        # 数据归类并上传
+        if len(tax_data) > 0 and (tax_json['data'] == None or tax_json['total'] <= page_size):
+        # if len(tax_data) > 0:
+            self.sy_tax_si(tax_data)
+
+    def sy_tax_si(self,tax_data):
+        gl_data = {}
+        htool = HTool()
+        for it in tax_data:
+            if it['aae002'] not in gl_data:
+                gl_data[it['aae002']] = [it]
+            else:
+                gl_data[it['aae002']].append(it)
+        # 数据继续归类，上传
+        for gl in gl_data:
+            rows = gl_data[gl]
+            # 按照人汇总
+            users = {}
+            post_user = []
+            kk_date = ''
+            for sig in rows:
+                user_sign = sig['aae003']+sig['aac002']
+                if user_sign not in users:
+                    kk_date = sig['aae002']
+                    users[user_sign] = {"data_id":"%s%s" %(self.corpid,user_sign),"kk_date":sig['aae002'],"identify":sig['aac002'],"type":sig['aaa115'],"type_name":sig['aaa115_mc'],"period":sig['aae003'],"uname":sig['aac003'],"total_money":float(sig['aae022'])+float(sig['aae020']),"gr":float(sig['aae022']),"dw":float(sig['aae020'])}
+                else:
+                    users[user_sign]["gr"] += float(sig['aae022'])
+                    users[user_sign]["dw"] += float(sig['aae020'])
+                    users[user_sign]["total_money"] += float(sig['aae022']) + float(sig['aae020'])
+            for po in users:
+                staff = users[po]
+                staff['gr'] = "%.2f" % staff['gr']
+                staff['dw'] = "%.2f" % staff['dw']
+                staff['total_money'] = "%.2f" % staff['total_money']
+                post_user.append(staff)
+            print('汇总数据',len(post_user))    
+            sb_ret = htool.post_data(self.sb_jk_detail_upload_url,{"post_user":json.dumps(post_user),"corpid":self.corpid,"kk_date":kk_date})
+            if sb_ret.status_code != 200:
+                print("post_user",sb_ret.text)
 
     # 报税
     def tax_sb(self):
