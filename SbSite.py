@@ -31,7 +31,7 @@ class SbExport:
         self.login_url = config['link']['ah_sb_login_url']
         self.ah_sb_hd_url = config['link']['ah_sb_hd_url']
         # 社保账号密码
-        self.si_account_ret_url = config['link']['si_account_ret_url']
+        self.si_account_ret_url = self.htool.get_link_by_env('si_account_ret_url')
         self.taxObj = taxObj
         self.driver = self.taxObj.driver
 
@@ -48,7 +48,7 @@ class SbExport:
                 post_data['comp_status'] = 0
                 post_data['content'] = '社保账号或密码不正确，请及时修改'
                 post_ret = self.htool.post_data(self.taxObj.tax_password_url,{'corpid':self.taxObj.corpid,'shebao_pwd':'0','msg':'报税密码错误，请及时修改'})
-                print('密码错误上传结果',post_ret)
+                print('密码错误上传结果',post_ret.text)
                 self.driver.quit()
                 return post_data
             sb_account = tax_json['shebao_number']
@@ -79,12 +79,15 @@ class SbExport:
             return False
         login_times -= 1
         
+        
         # try:
-        tax_code_input = driver.find_element_by_id("username")
-        pwd_input = driver.find_element_by_id("password")
+        # tax_code_input = driver.find_element_by_id("username")
+        # pwd_input = driver.find_element_by_id("password")
         verify_code = driver.find_element_by_xpath("//form[@id='form1']//input[@name='verify']")
-        tax_code_input.send_keys(self.sb_account)
-        pwd_input.send_keys(self.sb_pwd)
+        # tax_code_input.send_keys(self.sb_account)
+        driver.execute_script("$('.wsbsLoginBg #username').val('%s')" % self.sb_account)
+        # pwd_input.send_keys(self.sb_pwd)
+        driver.execute_script("$('.wsbsLoginBg #password').val('%s')" % self.sb_pwd)
         parse_code = self.parse_action()
         verify_code.send_keys(parse_code)
         # print('解析结果',parse_code)
@@ -122,14 +125,11 @@ class SbExport:
         res = htool.send_img(local_img)
 
         if res['parse']:
-            print('')
             return res['parse']
         else:
             print('解析验证码失败，重新解析')
             sleep(2)
             return self.parse_action()
-
-
 
     # 获取申报数据 
     def get_sb_data(self):

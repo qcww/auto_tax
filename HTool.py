@@ -33,7 +33,17 @@ class HTool(HTMLParser):
         self.parse_code_img_url = self.config['link']['parse_code_img_url']
 
     def rt_config(self):
-        return self.config    
+        return self.config
+
+    def get_cfg_by_env(self,section,key):
+        env = self.config['debug']['env']
+        key = '%s_%s' % (env,key)
+        return self.config[section][key]
+
+    def get_link_by_env(self,key,domain = 'interface',section = 'link'):
+        host = self.get_cfg_by_env('host',domain)
+        return host + self.config[section][key]    
+
     
     def handle_starttag(self,tag,attr):  
         if tag == self.starttag:  
@@ -104,7 +114,7 @@ class HTool(HTMLParser):
         for i in range(img.size[0]):
             for j in range(img.size[1]):
                 if (pixels[i,j][0] > 100 or pixels[i,j][1] > 100 or pixels[i,j][2] > 100) and pixels[i,j] != (0,0,0):
-                    pixels[i,j] = (254, 255, 255)
+                    pixels[i,j] = (255, 255, 255)
                 else:
                     pixels[i,j] = (0, 0, 0)
         img.save(save_name)
@@ -124,17 +134,27 @@ class HTool(HTMLParser):
                         fix_pix.append((i,j))
                         # pixels[i,j] = (0, 0, 0)
                     else:
-                        pixels[i,j] = (254, 255, 255)   
+                        pixels[i,j] = (255, 255, 255)   
         # print(fix_pix)
         for fix in fix_pix:
             i,j = fix
             # print(i,j)
             pixels[i,j] = (0, 0, 0)
 
+        # 二次处理
+        for i in range(img.size[0]):
+            for j in range(img.size[1]):
+                if j < img.size[1] * 0.2 or j > img.size[1] * 0.9:
+                    continue
+                # 左右是白点，去掉中间的黑点
+                for f in range(5):
+                    if pixels[i,j] == (0, 0, 0) and pixels[i+f,j] == (255, 255, 255) and pixels[i-f,j] == (255, 255, 255):
+                        pixels[i,j] = (255, 255, 255)
+
         img.save(save_name)
 
     def recheck_pixel(self,img,pixels,i,j):
-        if j < img.size[1] * 0.2 or j > img.size[1] * 0.8:
+        if j < img.size[1] * 0.2 or j > img.size[1] * 0.9:
             return False
 
         try:
@@ -173,10 +193,10 @@ class HTool(HTMLParser):
         file = {'image':(img_path, file_handle, 'image/png')}
         r = requests.post(url=self.parse_code_img_url, headers=headers,files=file)
         file_handle.close()
-        # try:
-        #     os.remove(img_path)
-        # except(FileNotFoundError):
-        #     print("文件不存在")
+        try:
+            os.remove(img_path)
+        except(FileNotFoundError):
+            print("文件不存在")
         return json.loads(r.text)
 
 	# 获取浏览器cookie resquest post请求获取数据
@@ -212,6 +232,7 @@ class HTool(HTMLParser):
         }
 
         header = dict(header,**header_add)
+        # print('header',header)
         get_res = requests.get(url, headers=header)
         if get_res.status_code != 200 and retry > 0:
             retry -= 1
@@ -301,17 +322,22 @@ class HTool(HTMLParser):
         self.config.write(open(self.config_file,'w',encoding='utf-8'))
 
     #关闭弹框
-    def driver_close_alert(self,driver,limit = 1,ret = []):
-        try:
-            dig_alert = driver.switch_to.alert
-            ret.append(dig_alert.text)
-            dig_alert.accept()
-        except:
-            pass
-        limit -= 1
-        if limit > 0:
-            sleep(0.5)
-            return self.driver_close_alert(driver,limit)
+    def driver_close_alert(self,driver,limit = 1):
+        time.sleep(3)
+        ret = []
+        err_num = 0
+        for _ in range(limit):
+            try:
+                dig_alert = driver.switch_to.alert
+                # print(dig_alert.text)
+                ret.append(dig_alert.text)
+                dig_alert.dismiss()
+            except:
+                err_num += 1
+            time.sleep(0.5)    
+        # print('关闭弹框err_num',err_num)
+        if err_num == limit:
+            return []
         return ret
 
     # 返回本月最后一天日期

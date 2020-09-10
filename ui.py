@@ -29,6 +29,45 @@ class MainMenu ( wx.Frame ):
 
 		self.menu_bar.Append( self.m_menu1, u"操作" )
 
+		self.setting_menu = wx.Menu()
+		self.env_menu = wx.Menu()
+		self.set_pro_menu = wx.MenuItem( self.env_menu, wx.ID_ANY, u"正式", wx.EmptyString, wx.ITEM_RADIO )
+		self.env_menu.Append( self.set_pro_menu )
+
+		self.set_test_menu = wx.MenuItem( self.env_menu, wx.ID_ANY, u"测试", wx.EmptyString, wx.ITEM_RADIO )
+		self.env_menu.Append( self.set_test_menu )
+
+		self.setting_menu.AppendSubMenu( self.env_menu, u"环境" )
+
+		self.browser_menu = wx.Menu()
+		self.set_bro_show_menu = wx.MenuItem( self.browser_menu, wx.ID_ANY, u"显示", wx.EmptyString, wx.ITEM_RADIO )
+		self.browser_menu.Append( self.set_bro_show_menu )
+
+		self.set_bro_hide_menu = wx.MenuItem( self.browser_menu, wx.ID_ANY, u"隐藏", wx.EmptyString, wx.ITEM_RADIO )
+		self.browser_menu.Append( self.set_bro_hide_menu )
+
+		self.setting_menu.AppendSubMenu( self.browser_menu, u"浏览器" )
+
+		self.tax_menu = wx.Menu()
+		self.set_tax_0 = wx.MenuItem( self.tax_menu, wx.ID_ANY, u"小规模无收入", wx.EmptyString, wx.ITEM_RADIO )
+		self.tax_menu.Append( self.set_tax_0 )
+
+		self.set_tax_1 = wx.MenuItem( self.tax_menu, wx.ID_ANY, u"小规模有收入", wx.EmptyString, wx.ITEM_RADIO )
+		self.tax_menu.Append( self.set_tax_1 )
+
+		self.set_tax_2 = wx.MenuItem( self.tax_menu, wx.ID_ANY, u"一般纳税人无收入", wx.EmptyString, wx.ITEM_RADIO )
+		self.tax_menu.Append( self.set_tax_2 )
+
+		self.set_tax_3 = wx.MenuItem( self.tax_menu, wx.ID_ANY, u"一般纳税人有收入", wx.EmptyString, wx.ITEM_RADIO )
+		self.tax_menu.Append( self.set_tax_3 )
+
+		self.set_tax_4 = wx.MenuItem( self.tax_menu, wx.ID_ANY, u"循环挂起", wx.EmptyString, wx.ITEM_RADIO )
+		self.tax_menu.Append( self.set_tax_4 )
+
+		self.setting_menu.AppendSubMenu( self.tax_menu, u"报税" )
+
+		self.menu_bar.Append( self.setting_menu, u"设置" )
+
 		self.SetMenuBar( self.menu_bar )
 
 		bSizer3 = wx.BoxSizer( wx.HORIZONTAL )
@@ -85,6 +124,15 @@ class MainMenu ( wx.Frame ):
 
 		# Connect Events
 		self.Bind( wx.EVT_MENU, self.clear_log, id = self.m_menuItem1.GetId() )
+		self.Bind( wx.EVT_MENU, self.set_env_pro, id = self.set_pro_menu.GetId() )
+		self.Bind( wx.EVT_MENU, self.set_env_test, id = self.set_test_menu.GetId() )
+		self.Bind( wx.EVT_MENU, self.set_bro_show, id = self.set_bro_show_menu.GetId() )
+		self.Bind( wx.EVT_MENU, self.set_bro_hide, id = self.set_bro_hide_menu.GetId() )
+		self.Bind( wx.EVT_MENU, self.set_tax_0_0, id = self.set_tax_0.GetId() )
+		self.Bind( wx.EVT_MENU, self.set_tax_0_1, id = self.set_tax_1.GetId() )
+		self.Bind( wx.EVT_MENU, self.set_tax_1_0, id = self.set_tax_2.GetId() )
+		self.Bind( wx.EVT_MENU, self.set_tax_1_1, id = self.set_tax_3.GetId() )
+		self.Bind( wx.EVT_MENU, self.set_tax_all, id = self.set_tax_4.GetId() )
 		self.retry_btn.Bind( wx.EVT_TOGGLEBUTTON, self.retry )
 		self.agent_btn.Bind( wx.EVT_TOGGLEBUTTON, self.add_agent_task )
 		self.report_btn.Bind( wx.EVT_TOGGLEBUTTON, self.add_auto_tax_task )
@@ -97,6 +145,33 @@ class MainMenu ( wx.Frame ):
 
 	# Virtual event handlers, overide them in your derived class
 	def clear_log( self, event ):
+		event.Skip()
+
+	def set_env_pro( self, event ):
+		event.Skip()
+
+	def set_env_test( self, event ):
+		event.Skip()
+
+	def set_bro_show( self, event ):
+		event.Skip()
+
+	def set_bro_hide( self, event ):
+		event.Skip()
+
+	def set_tax_0_0( self, event ):
+		event.Skip()
+
+	def set_tax_0_1( self, event ):
+		event.Skip()
+
+	def set_tax_1_0( self, event ):
+		event.Skip()
+
+	def set_tax_1_1( self, event ):
+		event.Skip()
+
+	def set_tax_all( self, event ):
 		event.Skip()
 
 	def retry( self, event ):

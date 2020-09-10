@@ -82,6 +82,17 @@ class Ep(ui.MainMenu):
         self.htool = HTool()
         self.config = self.htool.rt_config()
         self.task_arr = []
+        self.auto_tax_cond = 'bundle-0-0||9'
+        
+        if self.config['debug']['env'] == 'test':
+            self.set_test_menu.Check(True)
+        else:
+            self.set_pro_menu.Check(True)
+
+        if self.config['debug']['browser_show'] == '1':
+            self.set_bro_show_menu.Check(True)
+        else:
+            self.set_bro_hide_menu.Check(True)
 
         self.tax_site = TaxSite(self)
        
@@ -102,6 +113,49 @@ class Ep(ui.MainMenu):
 
     def retry( self, event ):
         self.running_index = 0
+
+    def set_env_pro( self, event ):
+        self.set_config('debug','env','pro')
+
+    def set_env_test( self, event ):
+        self.set_config('debug','env','test')
+
+    def set_bro_show( self, event ):
+        self.set_config('debug','browser_show','1')
+
+    def set_bro_hide( self, event ):
+        self.set_config('debug','browser_show','0')
+
+    def set_tax_0_0( self, event ):
+        self.add_log('设置自动报税为小规模无收入')
+        self.auto_tax_action = False
+        self.auto_tax_cond = 'bundle-0-0||9'
+
+    def set_tax_0_1( self, event ):
+        self.add_log('设置自动报税为小规模有收入')
+        self.auto_tax_action = False
+        self.auto_tax_cond = 'bundle-0-1||9'
+
+    def set_tax_1_0( self, event ):
+        self.add_log('设置自动报税为一般纳税人无收入')
+        self.auto_tax_action = False
+        self.auto_tax_cond = 'bundle-1-0||9'
+
+    def set_tax_1_1( self, event ):
+        self.add_log('设置自动报税为一般纳税人有收入')
+        self.auto_tax_action = False
+        self.auto_tax_cond = 'bundle-1-1||9'
+
+    def set_tax_all( self, event ):
+        self.auto_tax_cond = 'bundle-0-0||9'
+        self.auto_tax_action = True
+        # self.auto_tax = True
+
+    # 写入配置
+    def set_config(self,section,key,value):
+        set_val = str(value)
+        self.config.set(section,key,re.sub(r'%','#53',set_val.strip()))
+        self.config.write(open(self.htool.config_file,'w',encoding='utf-8'))
 
     def add_kk_task( self, event ):
         self.auto_kk = bool(1-self.auto_kk)
@@ -152,6 +206,8 @@ class Ep(ui.MainMenu):
         self.auto_dkfp = False
         self.auto_upload = False
         self.auto_sbjk_upload = False
+        self.auto_tax_action = False
+        self.auto_tax_index = 0
 
         # self.set_status('已准备')
 
@@ -185,26 +241,30 @@ class Ep(ui.MainMenu):
 
     # 保持运行检查未完成任务
     def check_task_win(self):
-        print('running_index',self.running_index)
+        # print('running_index',self.running_index)
         while True:
             # 同步数据
-            if len(self.task_arr) == 0:
-                self.running_index = -1
             # 有新任务
-            if self.running_index <= (len(self.task_arr)-2) and len(self.task_arr) > 0:
-                self.running_index += 1
+            # print('running_index',self.running_index,len(self.task_arr))
+            if len(self.task_arr) > 0:
                 # print(self.running_index,self.task_arr,len(self.task_arr))
-                print('我的任务',self.task_arr[self.running_index])
-                self.syn_user_data(self.task_arr[self.running_index])
+                print('执行任务',self.task_arr[0])
+                try:
+                    self.syn_user_data(self.task_arr[0])
+                except Exception as e:
+                    print(e)
+                    pass
+                
+                self.remove_task()
             else:
                 if self.auto_kk == True:
                     self.add_log('自动获取未扣款数据')
                     # print('自动执行批量处理')
                     self.add_task_kk_bundle()
                 if self.auto_tax == True:
-                    self.add_log('自动获取未报税数据')
-                    # print('自动执行批量处理')
-                    self.add_task_tax_bundle()
+                    if self.auto_tax_action == False:
+                        self.add_log('自动获取未报税数据')
+                    self.add_task_tax_bundle(self.auto_tax_cond)
                 if self.auto_dkfp == True:
                     self.add_log('自动获取代开发票数据')
                     self.add_task_dkfp_bundle()
@@ -215,15 +275,15 @@ class Ep(ui.MainMenu):
                     self.add_log('自动获取社保待上传')
                     self.add_task_sb_upload_bundle()
             time.sleep(5)
-
-
+            
     def create_websocket(self):
         def on_message(ws, message):
             msg = json.loads(message)
             if msg['type'] == 'action' and msg['data'] != '':
                 print('收到消息',msg)
                 add_task = self.add_task(msg['data'])
-                reply = '{"type":"reply","isfree":1,"room_id":"%s","data":"%s","client_name":"%s","request_client_id":"%s"}' % (self.config['clien']['room_id'],add_task,self.config['clien']['name'],msg['request_client_id'])
+                room_id = self.htool.get_cfg_by_env('clien','room_id')
+                reply = '{"type":"reply","isfree":1,"room_id":"%s","data":"%s","client_name":"%s","request_client_id":"%s"}' % (room_id,add_task,self.config['clien']['name'],msg['request_client_id'])
                 print('回复消息',reply)
                 ws.send(reply)
 
@@ -245,7 +305,9 @@ class Ep(ui.MainMenu):
             self.add_log('')
             self.add_log('服务器连接成功')
             self.set_status('已准备')
-            ws.send('{"type":"login","room_id":"%s","client_name":"%s"}' % (self.config['clien']['room_id'],self.config['clien']['name']))
+            room_id = self.htool.get_cfg_by_env('clien','room_id')
+            print('room_id',room_id)
+            ws.send('{"type":"login","room_id":"%s","client_name":"%s"}' % (room_id,self.config['clien']['name']))
 
         websocket.enableTrace(True)
         ws = websocket.WebSocketApp("ws://im.itking.cc:12366",
@@ -259,7 +321,8 @@ class Ep(ui.MainMenu):
     # 回复浏览器消息
     def reply_explore(self,request_client_id,text):
         print('回复消息',request_client_id)
-        self.ws.send('{"type":"reply","room_id":"%s","request_client_id":"%s","client_name":"%s","data":"%s"}' % (self.config['client']['room_id'],request_client_id,self.uid,text))
+        room_id = self.htool.get_cfg_by_env('clien','room_id')
+        self.ws.send('{"type":"reply","room_id":"%s","request_client_id":"%s","client_name":"%s","data":"%s"}' % (room_id,request_client_id,self.uid,text))
 
     # 添加日志
     def add_log(self,text):
@@ -269,31 +332,31 @@ class Ep(ui.MainMenu):
         self.log_list.InsertItems([log_text],0)
 
     def syn_user_data(self,corp_data):
-        try:
-            if corp_data == None:
-                return False        
-            self.tax_site.set_corp(corp_data)
-            self.tax_site.open_browser()
-            if self.tax_site.action == '11':
-                sb_site = SbExport(self.tax_site)
-                si_login_ret = sb_site.login({},self.tax_site.corpid)
-                login_res = si_login_ret['ret']
-                print(si_login_ret)
-            elif self.tax_site.action == '12':
-                xnw_site = Xnw(self.tax_site)
-                xnw_login_ret = xnw_site.login({},self.tax_site.corpid)
-                login_res = xnw_login_ret['ret']
-                print(xnw_login_ret)
-            else:
-                login_res = self.tax_site.login()
-            # 登录失败，跳过
-            if login_res == False:
-                return False
-            else:
-                self.tax_site.page_init()
-                self.tax_site.driver_auto_action()
-        except Exception as e:
-            print('执行任务时出错',e)
+        # try:
+        if corp_data == None:
+            return False        
+        self.tax_site.set_corp(corp_data)
+        self.tax_site.open_browser()
+        if self.tax_site.action == '11':
+            sb_site = SbExport(self.tax_site)
+            si_login_ret = sb_site.login({},self.tax_site.corpid)
+            login_res = si_login_ret['ret']
+            print(si_login_ret)
+        elif self.tax_site.action == '12':
+            xnw_site = Xnw(self.tax_site)
+            xnw_login_ret = xnw_site.login({},self.tax_site.corpid)
+            login_res = xnw_login_ret['ret']
+            # print(xnw_login_ret)
+        else:
+            login_res = self.tax_site.login()
+        # 登录失败，跳过
+        if login_res == False:
+            return False
+        else:
+            self.tax_site.page_init()
+            self.tax_site.driver_auto_action()
+        # except Exception as e:
+        #     print('执行任务时出错',e)
 
     # 添加任务
     def add_task(self,corp_list):
@@ -310,8 +373,12 @@ class Ep(ui.MainMenu):
         elif corp_list == 'bundle||-7':
             self.auto_kk = False
             return '自动扣款任务已暂停'
-        if corp_list == 'bundle||9':
+        # if corp_list == 'bundle||9':
+        #     self.auto_tax = True
+        #     return '自动执行批量报税'
+        if 'bundle' in corp_list and '9' in corp_list:
             self.auto_tax = True
+            self.auto_tax_cond = corp_list
             return '自动执行批量报税'
         elif corp_list == 'bundle||-9':
             self.auto_tax = False
@@ -336,10 +403,10 @@ class Ep(ui.MainMenu):
         #     return '任务添加成功'
         # else:
         #     return '该任务已在任务列表里'
-        self.corpid, self.corpname, self.credit_code, self.pwd, self.sbrqq, self.sbrqz,self.action = corp_list.split('||',7)
-        self.task_list.InsertItems(["%s %s" % (time.strftime("%H:%M", time.localtime()),"收到请求:"+self.corpname + " " + self.action)],len(self.task_arr))
+        _, corpname, _, _, _, _,action = corp_list.split('||',7)
+        self.task_list.InsertItems(["%s %s" % (time.strftime("%H:%M", time.localtime()),"收到请求:"+corpname + " " + action)],len(self.task_arr))
         self.task_arr.extend([corp_list])
-        print('任务信息',corp_list)
+        print('任务列表',self.task_arr)
         return '任务添加成功'
 
     # 通过批处理添加扣款任务
@@ -361,24 +428,38 @@ class Ep(ui.MainMenu):
         return ret
 
     # 通过批处理添加报税任务
-    def add_task_tax_bundle(self):
-        print('自动申报')
-        tax_list = self.tax_site.get_tax_data()
+    def add_task_tax_bundle(self,auto_tax_cond):
+        # print('自动获取报税任务')
+        self.report_btn.SetValue(self.auto_tax)
+        tax_list = self.tax_site.get_tax_data(auto_tax_cond)
         # print('tax_list',tax_list)
         # 没有任务了，自动停止批量操作
-        if len(tax_list['rows']) == 0:
-            self.add_log('批量请求报税数据为空，自动暂停')
-            self.auto_tax = False
-            self.report_btn.SetValue(self.auto_tax)
-            self.report_btn.SetLabel('报税')
 
-        for re in tax_list['rows']:
-            post = (re['corpid'],re['corpname'],re['credit_code'],re['tax_pwd_gs'],"","","9")
-            post_data = '||'.join(post)
-            self.add_task(post_data)
-        ret = '剩余可报税数:' + tax_list['total']
-        self.set_status(ret)
-        return ret
+        if len(tax_list['rows']) == 0:
+            if self.auto_tax_action == False:
+                ret = '批量请求报税数据为空，自动暂停'
+                self.add_log(ret)
+                self.auto_tax = False
+                self.report_btn.SetValue(self.auto_tax)
+                self.report_btn.SetLabel('报税')
+                self.set_status(ret)
+            else:
+                time.sleep(55)
+                cond_arr = ['bundle-0-0||9','bundle-0-1||9','bundle-1-0||9','bundle-1-1||9']
+                self.auto_tax_index += 1
+                self.auto_tax_cond = cond_arr[self.auto_tax_index % 4]
+                ret = '正在获取待申报数据'
+                self.set_status(ret + self.auto_tax_cond)
+                if self.auto_tax_index == 4:
+                    self.auto_tax_index = 0
+        else:    
+            for re in tax_list['rows']:
+                post = (re['corpid'],re['corpname'],re['credit_code'],re['tax_pwd_gs'],"","","9")
+                post_data = '||'.join(post)
+                self.add_task(post_data)
+            ret = '剩余可报税数:' + tax_list['total']
+            self.set_status(ret)
+            return ret
 
     def add_task_dkfp_bundle(self):
         print('自动获取代开发票')
@@ -392,7 +473,15 @@ class Ep(ui.MainMenu):
             self.agent_btn.SetLabel('代开发票')
 
         for re in tax_list['rows']:
-            post = (re['corpid'],re['corpname'],re['credit_code'],re['tax_pwd_gs'],"","","10")
+            if re['agent_invoice_type'] == '2':
+                action_type = '10'
+                post = (re['corpid'],re['corpname'],re['credit_code'],re['tax_pwd_gs'],"","",action_type)
+            else:
+                action_type = '12'
+                if re['xnw_number'] == '' and re['xnw_pwd'] == '':
+                    re['xnw_number'] = re['credit_code']
+                    re['xnw_pwd'] = re['tax_pwd_gs']
+                post = (re['corpid'],re['corpname'],re['xnw_number'],re['xnw_pwd'],"","",action_type)
             post_data = '||'.join(post)
             self.add_task(post_data)
         ret = '剩余待上传开具发票公司:' + tax_list['total']
@@ -411,7 +500,7 @@ class Ep(ui.MainMenu):
             self.tax_sb_btn.SetLabel('社保上传')
 
         for re in tax_list['rows']:
-            post = (re['corpid'],re['corpname'],re['credit_code'],re['tax_pwd_gs'],"202001",time.strftime("%Y%m", time.localtime()),"11")
+            post = (re['corpid'],re['corpname'],re['credit_code'],re['tax_pwd_gs'],time.strftime("%Y%m", time.localtime()),time.strftime("%Y%m", time.localtime()),"11")
             post_data = '||'.join(post)
             self.add_task(post_data)
         ret = '剩余待上传社保公司:' + tax_list['total']
@@ -441,9 +530,8 @@ class Ep(ui.MainMenu):
     # 执行成功,删除任务
     def remove_task(self):
         if len(self.task_arr) > 0:
-            self.task_arr.pop(self.running_index)
-            self.task_list.Delete(self.running_index)
-            self.running_index -= 1
+            self.task_arr.pop(0)
+            self.task_list.Delete(0)
             
 
     def post_link(self,link,post_data):

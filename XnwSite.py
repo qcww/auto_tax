@@ -30,7 +30,7 @@ class Xnw:
         self.login_url = 'https://www.nuocity.com/xnw_user_ssoservice/login?service=https%3A%2F%2Fwww.nuocity.com%2Fxnw%2Fzz%2Flogin.jspx%3FreturnUrl%3Dhttps%253A%252F%252Fwww.nuocity.com%252F%26locale%3Dzh_CN'
         self.ah_sb_hd_url = config['link']['ah_sb_hd_url']
         # 社保账号密码
-        self.si_account_ret_url = config['link']['si_account_ret_url']
+        self.si_account_ret_url = self.htool.get_link_by_env('si_account_ret_url')
         self.taxObj = taxObj
         self.driver = self.taxObj.driver
 
@@ -43,7 +43,7 @@ class Xnw:
         # sleep(1)
         # self.driver.execute_script("$('.layui-layer-dialog .layui-layer-btn a:eq(0)').click()")
         # 尝试登录
-        ret = self.login_action(6)
+        ret = self.login_action(8)
         post_data['ret'] = ret
         return post_data
 
@@ -56,28 +56,41 @@ class Xnw:
             driver.quit()
             return False
         login_times -= 1
-        self.driver.execute_script("$('.tab li:eq(1)').click()")
-        
-        # try:
-        self.driver.execute_script("$('#username2').val('%s')" % self.taxObj.credit_code)
-        self.driver.execute_script("$('#password2').val('%s')" % self.taxObj.pwd)
-        parse_code = self.parse_action()
-        self.driver.execute_script("$('#j_captcha_response2').val('%s')" % parse_code)
-        print('解析结果',parse_code)
-        driver.execute_script("$('#qyboxnr input[name=submit]').click()")
-        sleep(3)
-        # curr_link = driver.current_url
+        if len(self.taxObj.credit_code) != 11:
+            self.driver.execute_script("$('.tab li:eq(1)').click()")
+            
+            # try:
+            self.driver.execute_script("$('#username2').val('%s')" % self.taxObj.credit_code)
+            self.driver.execute_script("$('#password2').val('%s')" % self.taxObj.pwd)
+            parse_code = self.parse_action('vdImg2')
+            self.driver.execute_script("$('#j_captcha_response2').val('%s')" % parse_code)
+            # print('解析结果',parse_code)
+            driver.execute_script("$('#qyboxnr input[name=submit]').click()")
+        else:
+            # try:
+            self.driver.execute_script("$('#username0').val('%s')" % self.taxObj.credit_code)
+            self.driver.execute_script("$('#password0').val('%s')" % self.taxObj.pwd)
+            parse_code = self.parse_action('vdImg0')
+            self.driver.execute_script("$('#j_captcha_response0').val('%s')" % parse_code)
+            # print('解析结果',parse_code)
+            driver.execute_script("$('#qyboxnr input[name=submit]').click()")
+
+        sleep(2)
+        curr_link = driver.current_url
         # print('当前链接',curr_link)
-        # 判断是否有密码错误的提示框出来 
+        if curr_link == 'https://www.nuocity.com/':
+            return True
+        # 判断是否有密码错误的提示框出来
         try:
             pass_err = driver.find_element_by_class_name("layui-layer-dialog")
             if pass_err:
                 # print('pass_err',pass_err)
                 err_msg = pass_err.find_element_by_xpath("./div[@class='layui-layer-content layui-layer-padding']").text
+                print('err_msg',err_msg)
                 # print('错误信息',err_msg)
-                if '用户名格式不正确' in err_msg or '用户名不能为空' in err_msg or '密码不能为空' in err_msg or '您输入的用户名或密码不正确' in err_msg:
+                if '用户名格式不正确' in err_msg or '手机号格式不正确' in err_msg or '用户名不能为空' in err_msg or '密码不能为空' in err_msg or '您输入的用户名或密码不正确' in err_msg or '您输入的手机号或密码不正确' in err_msg:
                     print('账号密码错误')
-                    self.htool.post_data(self.taxObj.tax_password_url,{'corpid':self.taxObj.corpid,'pwd':'0','msg':err_msg})
+                    self.htool.post_data(self.taxObj.tax_password_url,{'corpid':self.taxObj.corpid,'xnw_pwd':'0','msg':err_msg})
                     driver.quit()
                     return False
                 # 如果是计算结果错误,可重试
@@ -93,10 +106,10 @@ class Xnw:
         return False
 
     # 解析验证码，直到获取到一个结果为止        
-    def parse_action(self):
+    def parse_action(self,img_id):
         #保存验证码图片到本地 并识别
         htool = HTool()
-        local_img = htool.save_ercode_img(self.driver,"//img[@id='vdImg2']",2)
+        local_img = htool.save_ercode_img(self.driver,"//img[@id='%s']" % img_id,2)
         res = htool.send_img(local_img)
 
         if res['parse'] != '' and len(str(res['parse'])) == 4:
@@ -104,9 +117,7 @@ class Xnw:
         else:
             print('解析验证码失败，重新解析')
             sleep(1)
-            return self.parse_action()
-
-
+            return self.parse_action(img_id)
 
     # 获取申报数据 
     def get_sb_data(self):
