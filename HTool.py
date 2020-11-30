@@ -11,10 +11,12 @@ import time
 import datetime
 import sys
 import urllib.request
+import sqlite3
 from time import sleep
 from urllib.parse import urlencode  #Python内置的HTTP请求库
 from selenium import webdriver
 from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.chrome.options import Options
 from html.parser import HTMLParser
 from PIL import Image, ImageEnhance
 
@@ -402,3 +404,165 @@ class HTool(HTMLParser):
     # 生成数据集合
     def to_match_f1(self,sb_data,tp,t_index):
         return [sb_data['sr_%s%s_z' % (t_index,tp)],sb_data['tax_%s%s_z' % (t_index,tp)],sb_data['sr_%s%s_p' % (t_index,tp)],sb_data['tax_%s%s_p' % (t_index,tp)]]
+
+class HLogin:
+    def __init__(self,run_id):
+        self.run_id = run_id
+
+    def login_wait(self):
+        while True:
+            htool = HTool()
+            self.config = htool.rt_config()
+            running_id = self.config['login']['run_id']
+            last_run_time = self.config['login']['last_run_time']
+            if running_id == '' or int(last_run_time) < round(time.time()) - 60:
+                htool.set_config('login','run_id',self.run_id)
+                htool.set_config('login','last_run_time',round(time.time()))
+                return True
+            else:
+                print('wait')
+                time.sleep(5)
+
+    #打开浏览器
+    def open_browser(self):
+        chrome_options = Options()
+
+        tmp_path = regedit.get_client_path()
+        # 配置chrom浏览器默认保存文件路径
+        prefs = {'profile.default_content_settings.popups': 0, #防止保存弹窗
+        'download.default_directory':tmp_path,#设置默认下载路径
+        "profile.default_content_setting_values.automatic_downloads":1#允许多文件下载
+        }
+        chrome_options.add_experimental_option('prefs', prefs)
+        #修改windows.navigator.webdriver，防机器人识别机制，selenium自动登陆判别机制
+        chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
+
+        # 使用代理
+        # chrome_options.add_argument("--proxy-server=http://125.123.18.114:4226")
+        htool = HTool()
+        self.config = htool.rt_config()
+        self.show_browser = self.config['debug']['browser_show']
+        # 根据配置是否显示浏览器
+        if self.show_browser == '0':
+            chrome_options.add_argument('--headless')
+            chrome_options.add_argument('--disable-gpu')
+
+        self.driver = webdriver.Chrome(chrome_options=chrome_options)
+        self.driver.maximize_window() 
+
+    def set_driver_cookies(self,current_url,cookie_str):
+        '''使用Selenium模拟浏览器登录并获取cookies'''
+        self.driver.get(current_url)
+        # 等待3秒，用于等待浏览器启动完成，否则可能报错
+        time.sleep(2)
+        # 测试代码
+        cookie_arr = cookie_str.split(';')
+        for it in cookie_arr:
+            cookie = {}
+            dc_one = it.split('=')
+            if len(dc_one) < 2:
+                break
+            self.driver.delete_cookie(dc_one[0].strip())
+
+            cookie['name'] = dc_one[0].strip()
+            cookie['value'] = dc_one[1]
+            self.driver.add_cookie(cookie)
+        time.sleep(2)    
+        self.driver.get(current_url)    
+        return self.driver    
+
+    def restart_driver(self,driver):
+        htool = HTool()
+        htool.set_config('login','run_id','')
+        htool.set_config('login','last_run_time','')
+        _cookie = htool.get_cookie(driver)
+        current_url = driver.current_url
+        driver.quit()
+        self.open_browser()
+        return self.set_driver_cookies(current_url,_cookie)
+
+
+class SqlTool:
+
+    def __init__(self):
+        self.conn = sqlite3.connect("xscw.db")
+        self.hd_cursor = self.conn.cursor()
+
+    def search_datas(self,table,cond = [],search_field = ['*'],group_by = ''):
+        cond_field = []
+        ret = []
+        cond_str = ''
+        gorup_str = ''
+        for it in cond:
+            if type(cond[it]) is type(''):
+                cond_field.append(it+"='" + cond[it] + "'")
+            else:
+                cond_field.append(it + '=' + str(cond[it]))
+        if len(cond_field) > 0:
+            cond_str =  'WHERE ' + 'AND'.join(cond_field)
+        if group_by != '':
+            gorup_str = 'GROUP By '+ group_by 
+
+        sql = "SELECT %s from %s %s %s;" % (','.join(search_field),table,cond_str,gorup_str)
+        
+        self.hd_cursor.execute(sql)
+        col_name_list = [tuple[0] for tuple in self.hd_cursor.description]
+        # print(sql,col_name_list)
+        search_ret = self.hd_cursor.fetchall()
+        if len(search_ret) > 0:
+            for i in search_ret:
+                dic_one = {}
+                s_index = 0
+                for j in col_name_list:
+                    dic_one[j] = i[s_index]
+                    s_index += 1
+                # print(dic_one)    
+                ret.append(dic_one)
+        self.close_database()
+        return ret
+
+    def insert_row(self,table,insert_data):
+        insert_field = []
+        insert_value = []
+        for it in insert_data:
+            insert_field.append(it)
+            if type(insert_data[it]) is type(''):
+                insert_value.append("'" + insert_data[it] + "'")
+            else:    
+                insert_value.append(str(insert_data[it]))
+        sql = "INSERT INTO %s (id,%s) VALUES (NULL,%s);" % (table,','.join(insert_field),','.join(insert_value))
+        print(sql)
+        self.hd_cursor.execute(sql)
+        self.close_database()
+
+    def update_rows(self,table,cond,update_data):
+        cond_field = []
+        update_value = []
+        for it in update_data:
+            if type(update_data[it]) is type(''):
+                update_value.append(it+"='" + update_data[it] + "'")
+            else:
+                update_value.append(it + '=' + str(update_data[it]))
+
+        for it in cond:
+            if type(cond[it]) is type(''):
+                cond_field.append(it+"='" + cond[it] + "'")
+            else:
+                cond_field.append(it + '=' + str(cond[it]))  
+        sql = "UPDATE %s SET %s WHERE %s;" % (table,','.join(update_value),' AND '.join(cond_field))
+        print(sql)
+        self.hd_cursor.execute(sql)
+        self.close_database()
+
+    def close_database(self):
+        self.hd_cursor.close()
+        self.conn.commit()
+        self.conn.close()
+
+
+# test_sq = SqlTool()
+# test_sq.search_data()
+# test_sq.insert_row('login_task',{"machine_id":"ergekrgjkergr","task_con":"fwefwef","login_type":3,"ret_cookie":"fwfwefwef","add_time":2342343,"update_time":234345,"is_del":0})
+# test_sq.update_rows('login_task',{"id":2},{"machine_id":"ewfdgrhreh"})
+# dd = test_sq.search_datas('login_task',{"id":2},['id','machine_id'])
+# print(dd)

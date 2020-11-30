@@ -16,13 +16,13 @@ import websocket
 import threading
 import json
 import requests
-import json
-import websocket
+import uuid
 from SbSite import SbExport
 from XnwSite import Xnw
 
 from TaxSite import TaxSite
 from HTool import HTool
+from HTool import HLogin
 
 class TaskBarIcon(wx.adv.TaskBarIcon):
     def __init__(self, frame):
@@ -83,6 +83,9 @@ class Ep(ui.MainMenu):
         self.config = self.htool.rt_config()
         self.task_arr = []
         self.auto_tax_cond = 'bundle-0-0||9'
+        self.msg_receive = 1
+
+        self.run_id = uuid.uuid1()
         
         if self.config['debug']['env'] == 'test':
             self.set_test_menu.Check(True)
@@ -93,6 +96,8 @@ class Ep(ui.MainMenu):
             self.set_bro_show_menu.Check(True)
         else:
             self.set_bro_hide_menu.Check(True)
+
+        self.do_type = 1    
 
         self.tax_site = TaxSite(self)
        
@@ -110,9 +115,6 @@ class Ep(ui.MainMenu):
 
     def OnClose(self, event):
         self.Hide()
-
-    def retry( self, event ):
-        self.running_index = 0
 
     def set_env_pro( self, event ):
         self.set_config('debug','env','pro')
@@ -151,11 +153,25 @@ class Ep(ui.MainMenu):
         self.auto_tax_action = True
         # self.auto_tax = True
 
+    def msg_receive_1( self, event ):
+        self.msg_receive = 1
+
+    def msg_receive_0( self, event ):
+        self.msg_receive = 0
+
+    def do_type2( self, event ):
+        self.do_type = 2
+
+    def do_type1( self, event ):
+        self.do_type = 1
+
     # 写入配置
     def set_config(self,section,key,value):
         set_val = str(value)
         self.config.set(section,key,re.sub(r'%','#53',set_val.strip()))
         self.config.write(open(self.htool.config_file,'w',encoding='utf-8'))
+        self.htool = HTool()
+        self.config = self.htool.rt_config()
 
     def add_kk_task( self, event ):
         self.auto_kk = bool(1-self.auto_kk)
@@ -171,16 +187,7 @@ class Ep(ui.MainMenu):
         if self.auto_sbjk_upload == True:
             self.tax_sb_btn.SetLabel('正在上传')
         else:
-            self.tax_sb_btn.SetLabel('社保上传')
-
-
-    def task_upload_task(self,event):
-        self.auto_upload = bool(1-self.auto_upload)
-        self.bs_upload_btn.SetValue(self.auto_upload)
-        if self.auto_upload == True:
-            self.bs_upload_btn.SetLabel('正在上传')
-        else:
-            self.bs_upload_btn.SetLabel('报税上传')   
+            self.tax_sb_btn.SetLabel('社保上传') 
 
     def add_auto_tax_task(self,event):
         self.auto_tax = bool(1-self.auto_tax)
@@ -218,7 +225,7 @@ class Ep(ui.MainMenu):
         return True
 
     def set_status(self,text,i=0):
-        self.SetStatusText(text,i)
+        self.SetStatusText(time.strftime("%H:%M:%S", time.localtime()) + ' ' + text,i)
 
     def connect_service(self):
         # self.run_status = bool(1 - self.run_status)
@@ -249,7 +256,12 @@ class Ep(ui.MainMenu):
             if len(self.task_arr) > 0:
                 # print(self.running_index,self.task_arr,len(self.task_arr))
                 print('执行任务',self.task_arr[0])
+                # self.syn_user_data(self.task_arr[0])
                 try:
+                    login_tool = HLogin(self.run_id)
+                    task_split = self.task_arr[0].split('||')
+                    if task_split[-1] != '11':
+                        login_tool.login_wait()
                     self.syn_user_data(self.task_arr[0])
                 except Exception as e:
                     print(e)
@@ -279,7 +291,7 @@ class Ep(ui.MainMenu):
     def create_websocket(self):
         def on_message(ws, message):
             msg = json.loads(message)
-            if msg['type'] == 'action' and msg['data'] != '':
+            if msg['type'] == 'action' and msg['data'] != '' and self.msg_receive == 1:
                 print('收到消息',msg)
                 add_task = self.add_task(msg['data'])
                 room_id = self.htool.get_cfg_by_env('clien','room_id')
@@ -336,6 +348,7 @@ class Ep(ui.MainMenu):
         if corp_data == None:
             return False        
         self.tax_site.set_corp(corp_data)
+        self.tax_site.set_runid(self.run_id)
         self.tax_site.open_browser()
         if self.tax_site.action == '11':
             sb_site = SbExport(self.tax_site)
@@ -344,6 +357,7 @@ class Ep(ui.MainMenu):
             print(si_login_ret)
         elif self.tax_site.action == '12':
             xnw_site = Xnw(self.tax_site)
+            xnw_site.set_runid(self.run_id)
             xnw_login_ret = xnw_site.login({},self.tax_site.corpid)
             login_res = xnw_login_ret['ret']
             # print(xnw_login_ret)
@@ -351,8 +365,12 @@ class Ep(ui.MainMenu):
             login_res = self.tax_site.login()
         # 登录失败，跳过
         if login_res == False:
+            self.htool.set_config('login','run_id','')
+            self.htool.set_config('login','last_run_time','')
             return False
         else:
+            if self.config['debug']['browser_show'] == '0':
+                self.tax_site.restart_driver()
             self.tax_site.page_init()
             self.tax_site.driver_auto_action()
         # except Exception as e:
@@ -413,11 +431,14 @@ class Ep(ui.MainMenu):
     def add_task_kk_bundle(self):
         kk_list = self.tax_site.get_kk_data()
         # 没有任务了，自动停止批量操作
-        if len(kk_list['rows']) == 0:
-            self.add_log('批量请求扣款数据为空，自动暂停')
-            self.auto_kk = False
-            self.kk_btn.SetValue(self.auto_kk)
-            self.kk_btn.SetLabel('扣款')
+        if len(kk_list['rows']) == 0 :
+            if self.do_type == 1:
+                self.add_log('批量请求扣款数据为空，自动暂停')
+                self.auto_kk = False
+                self.kk_btn.SetValue(self.auto_kk)
+                self.kk_btn.SetLabel('扣款')
+            else:
+                time.sleep(15)    
 
         for re in kk_list['rows']:
             post = (re['corpid'],re['corpname'],re['credit_code'],re['tax_pwd_gs'],"","","7")
@@ -437,14 +458,17 @@ class Ep(ui.MainMenu):
 
         if len(tax_list['rows']) == 0:
             if self.auto_tax_action == False:
-                ret = '批量请求报税数据为空，自动暂停'
-                self.add_log(ret)
-                self.auto_tax = False
-                self.report_btn.SetValue(self.auto_tax)
-                self.report_btn.SetLabel('报税')
-                self.set_status(ret)
+                if self.do_type == 1:
+                    ret = '批量请求报税数据为空，自动暂停'
+                    self.add_log(ret)
+                    self.auto_tax = False
+                    self.report_btn.SetValue(self.auto_tax)
+                    self.report_btn.SetLabel('报税')
+                    self.set_status(ret)
+                else:
+                    time.sleep(15)    
             else:
-                time.sleep(55)
+                time.sleep(60)
                 cond_arr = ['bundle-0-0||9','bundle-0-1||9','bundle-1-0||9','bundle-1-1||9']
                 self.auto_tax_index += 1
                 self.auto_tax_cond = cond_arr[self.auto_tax_index % 4]
@@ -462,15 +486,17 @@ class Ep(ui.MainMenu):
             return ret
 
     def add_task_dkfp_bundle(self):
-        print('自动获取代开发票')
         tax_list = self.tax_site.get_dkjfp_data()
         # print('tax_list',tax_list)
         # 没有任务了，自动停止批量操作
         if len(tax_list['rows']) == 0:
-            self.add_log('批量请求待上传代开具发票企业为空，自动暂停')
-            self.auto_dkfp = False
-            self.agent_btn.SetValue(self.auto_dkfp)
-            self.agent_btn.SetLabel('代开发票')
+            if self.do_type == 1:
+                self.add_log('批量请求待上传代开具发票企业为空，自动暂停')
+                self.auto_dkfp = False
+                self.agent_btn.SetValue(self.auto_dkfp)
+                self.agent_btn.SetLabel('代开发票')
+            else:
+                time.sleep(15)    
 
         for re in tax_list['rows']:
             if re['agent_invoice_type'] == '2':
@@ -490,17 +516,21 @@ class Ep(ui.MainMenu):
 
     def add_task_sb_upload_bundle(self):
         print('自动获取待上传社保')
-        tax_list = self.tax_site.get_sb_jk_data()
+        kk_data = time.strftime("%Y%m", time.localtime())
+        tax_list = self.tax_site.get_sb_jk_data(kk_data)
         # print('tax_list',tax_list)
         # 没有任务了，自动停止批量操作
         if len(tax_list['rows']) == 0:
-            self.add_log('批量请求待上传社保企业为空，自动暂停')
-            self.auto_sbjk_upload = False
-            self.tax_sb_btn.SetValue(self.auto_sbjk_upload)
-            self.tax_sb_btn.SetLabel('社保上传')
+            if self.do_type == 1:
+                self.add_log('批量请求待上传社保企业为空，自动暂停')
+                self.auto_sbjk_upload = False
+                self.tax_sb_btn.SetValue(self.auto_sbjk_upload)
+                self.tax_sb_btn.SetLabel('社保上传')
+            else:
+                time.sleep(15)    
 
         for re in tax_list['rows']:
-            post = (re['corpid'],re['corpname'],re['credit_code'],re['tax_pwd_gs'],time.strftime("%Y%m", time.localtime()),time.strftime("%Y%m", time.localtime()),"11")
+            post = (re['corpid'],re['corpname'],re['credit_code'],re['tax_pwd_gs'],kk_data,kk_data,"11")
             post_data = '||'.join(post)
             self.add_task(post_data)
         ret = '剩余待上传社保公司:' + tax_list['total']
@@ -513,10 +543,13 @@ class Ep(ui.MainMenu):
         # print('tax_list',tax_list)
         # 没有任务了，自动停止批量操作
         if len(tax_list['rows']) == 0:
-            self.add_log('批量请求待上传报税企业为空，自动暂停')
-            self.auto_upload = False
-            self.bs_upload_btn.SetValue(self.auto_upload)
-            self.bs_upload_btn.SetLabel('报税上传')
+            if self.do_type == 1:
+                self.add_log('批量请求待上传报税企业为空，自动暂停')
+                self.auto_upload = False
+                self.bs_upload_btn.SetValue(self.auto_upload)
+                self.bs_upload_btn.SetLabel('报税上传')
+            else:
+                time.sleep(15)    
         
         for re in tax_list['rows']:
             print(re)

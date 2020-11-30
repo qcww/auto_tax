@@ -66,6 +66,26 @@ class MainMenu ( wx.Frame ):
 
 		self.setting_menu.AppendSubMenu( self.tax_menu, u"报税" )
 
+		self.mes_menu = wx.Menu()
+		self.menu_receive_1 = wx.MenuItem( self.mes_menu, wx.ID_ANY, u"接收", wx.EmptyString, wx.ITEM_RADIO )
+		self.mes_menu.Append( self.menu_receive_1 )
+		self.menu_receive_1.Check( True )
+
+		self.menu_receive_0 = wx.MenuItem( self.mes_menu, wx.ID_ANY, u"拒收", wx.EmptyString, wx.ITEM_RADIO )
+		self.mes_menu.Append( self.menu_receive_0 )
+
+		self.setting_menu.AppendSubMenu( self.mes_menu, u"消息推送" )
+
+		self.do_menu = wx.Menu()
+		self.set_do_1 = wx.MenuItem( self.do_menu, wx.ID_ANY, u"自行停止", wx.EmptyString, wx.ITEM_RADIO )
+		self.do_menu.Append( self.set_do_1 )
+		self.set_do_1.Check( True )
+
+		self.set_do_2 = wx.MenuItem( self.do_menu, wx.ID_ANY, u"循环待定", wx.EmptyString, wx.ITEM_RADIO )
+		self.do_menu.Append( self.set_do_2 )
+
+		self.setting_menu.AppendSubMenu( self.do_menu, u"执行" )
+
 		self.menu_bar.Append( self.setting_menu, u"设置" )
 
 		self.SetMenuBar( self.menu_bar )
@@ -96,9 +116,6 @@ class MainMenu ( wx.Frame ):
 		bSizer3.Add( bSizer5, 4, wx.EXPAND, 5 )
 
 		sbSizer2 = wx.StaticBoxSizer( wx.StaticBox( self, wx.ID_ANY, u"操作" ), wx.VERTICAL )
-
-		self.retry_btn = wx.ToggleButton( sbSizer2.GetStaticBox(), wx.ID_ANY, u"重试", wx.DefaultPosition, wx.DefaultSize, 0 )
-		sbSizer2.Add( self.retry_btn, 0, wx.ALL|wx.ALIGN_CENTER_HORIZONTAL, 5 )
 
 		self.agent_btn = wx.ToggleButton( sbSizer2.GetStaticBox(), wx.ID_ANY, u"代开发票", wx.DefaultPosition, wx.DefaultSize, 0 )
 		sbSizer2.Add( self.agent_btn, 0, wx.ALL, 5 )
@@ -133,7 +150,10 @@ class MainMenu ( wx.Frame ):
 		self.Bind( wx.EVT_MENU, self.set_tax_1_0, id = self.set_tax_2.GetId() )
 		self.Bind( wx.EVT_MENU, self.set_tax_1_1, id = self.set_tax_3.GetId() )
 		self.Bind( wx.EVT_MENU, self.set_tax_all, id = self.set_tax_4.GetId() )
-		self.retry_btn.Bind( wx.EVT_TOGGLEBUTTON, self.retry )
+		self.Bind( wx.EVT_MENU, self.msg_receive_1, id = self.menu_receive_1.GetId() )
+		self.Bind( wx.EVT_MENU, self.msg_receive_0, id = self.menu_receive_0.GetId() )
+		self.Bind( wx.EVT_MENU, self.do_type1, id = self.set_do_1.GetId() )
+		self.Bind( wx.EVT_MENU, self.do_type2, id = self.set_do_2.GetId() )
 		self.agent_btn.Bind( wx.EVT_TOGGLEBUTTON, self.add_agent_task )
 		self.report_btn.Bind( wx.EVT_TOGGLEBUTTON, self.add_auto_tax_task )
 		self.kk_btn.Bind( wx.EVT_TOGGLEBUTTON, self.add_kk_task )
@@ -174,7 +194,16 @@ class MainMenu ( wx.Frame ):
 	def set_tax_all( self, event ):
 		event.Skip()
 
-	def retry( self, event ):
+	def msg_receive_1( self, event ):
+		event.Skip()
+
+	def msg_receive_0( self, event ):
+		event.Skip()
+
+	def do_type1( self, event ):
+		event.Skip()
+
+	def do_type2( self, event ):
 		event.Skip()
 
 	def add_agent_task( self, event ):
@@ -187,6 +216,48 @@ class MainMenu ( wx.Frame ):
 		event.Skip()
 
 	def add_sb_upload_task( self, event ):
+		event.Skip()
+
+class MainLogin ( wx.Frame ):
+
+	def __init__( self, parent ):
+		wx.Frame.__init__ ( self, parent, id = wx.ID_ANY, title = u"多端异步登录", pos = wx.DefaultPosition, size = wx.Size( 282,302 ), style = wx.DEFAULT_FRAME_STYLE|wx.TAB_TRAVERSAL )
+
+		self.SetSizeHints( wx.Size( 282,302 ), wx.Size( 282,302 ) )
+		self.SetBackgroundColour( wx.Colour( 255, 255, 255 ) )
+
+		bSizer2 = wx.BoxSizer( wx.VERTICAL )
+
+		sbSizer1 = wx.StaticBoxSizer( wx.StaticBox( self, wx.ID_ANY, u"登录日志" ), wx.VERTICAL )
+
+		log_listChoices = []
+		self.log_list = wx.ListBox( sbSizer1.GetStaticBox(), wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, log_listChoices, 0 )
+		self.log_list.SetMinSize( wx.Size( 262,190 ) )
+		self.log_list.SetMaxSize( wx.Size( 262,190 ) )
+
+		sbSizer1.Add( self.log_list, 0, wx.ALIGN_CENTER_HORIZONTAL|wx.ALL, 5 )
+
+		self.m_toggleBtn1 = wx.ToggleButton( sbSizer1.GetStaticBox(), wx.ID_ANY, u"运行程序", wx.DefaultPosition, wx.DefaultSize, 0 )
+		sbSizer1.Add( self.m_toggleBtn1, 0, wx.ALL|wx.ALIGN_CENTER_HORIZONTAL|wx.EXPAND, 5 )
+
+
+		bSizer2.Add( sbSizer1, 1, wx.EXPAND, 5 )
+
+
+		self.SetSizer( bSizer2 )
+		self.Layout()
+
+		self.Centre( wx.BOTH )
+
+		# Connect Events
+		self.m_toggleBtn1.Bind( wx.EVT_TOGGLEBUTTON, self.do_login )
+
+	def __del__( self ):
+		pass
+
+
+	# Virtual event handlers, overide them in your derived class
+	def do_login( self, event ):
 		event.Skip()
 
 

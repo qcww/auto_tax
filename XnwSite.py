@@ -17,6 +17,7 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.chrome.options import Options
 from HTool import HTool
 from bs4 import BeautifulSoup
+from Verify import XnwVerify
 
 # 信诺网
 class Xnw:
@@ -33,6 +34,10 @@ class Xnw:
         self.si_account_ret_url = self.htool.get_link_by_env('si_account_ret_url')
         self.taxObj = taxObj
         self.driver = self.taxObj.driver
+
+    # 设置运行id
+    def set_runid(self,runid):
+        self.run_id = runid
 
      #登录
     def login(self,post_data,corpid):
@@ -56,24 +61,17 @@ class Xnw:
             driver.quit()
             return False
         login_times -= 1
+
         if len(self.taxObj.credit_code) != 11:
             self.driver.execute_script("$('.tab li:eq(1)').click()")
-            
-            # try:
             self.driver.execute_script("$('#username2').val('%s')" % self.taxObj.credit_code)
             self.driver.execute_script("$('#password2').val('%s')" % self.taxObj.pwd)
-            parse_code = self.parse_action('vdImg2')
-            self.driver.execute_script("$('#j_captcha_response2').val('%s')" % parse_code)
-            # print('解析结果',parse_code)
-            driver.execute_script("$('#qyboxnr input[name=submit]').click()")
         else:
-            # try:
             self.driver.execute_script("$('#username0').val('%s')" % self.taxObj.credit_code)
             self.driver.execute_script("$('#password0').val('%s')" % self.taxObj.pwd)
-            parse_code = self.parse_action('vdImg0')
-            self.driver.execute_script("$('#j_captcha_response0').val('%s')" % parse_code)
-            # print('解析结果',parse_code)
-            driver.execute_script("$('#qyboxnr input[name=submit]').click()")
+        verify = XnwVerify()
+        verify.verify_image(self.driver)
+        driver.execute_script("$('#qyboxnr input[name=submit]').click()")
 
         sleep(2)
         curr_link = driver.current_url
@@ -104,20 +102,6 @@ class Xnw:
         except Exception as e:
             print('登录解析时发生错误',e)
         return False
-
-    # 解析验证码，直到获取到一个结果为止        
-    def parse_action(self,img_id):
-        #保存验证码图片到本地 并识别
-        htool = HTool()
-        local_img = htool.save_ercode_img(self.driver,"//img[@id='%s']" % img_id,2)
-        res = htool.send_img(local_img)
-
-        if res['parse'] != '' and len(str(res['parse'])) == 4:
-            return res['parse']
-        else:
-            print('解析验证码失败，重新解析')
-            sleep(1)
-            return self.parse_action(img_id)
 
     # 获取申报数据 
     def get_sb_data(self):
