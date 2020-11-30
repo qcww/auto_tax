@@ -1,0 +1,7 @@
+.vscode
+__pycache__
+dist
+/auto_tax.exe
+/auto_tax.spec
+/debug.log
+/F.spec
