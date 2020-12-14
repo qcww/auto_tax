@@ -48,7 +48,10 @@ class XnwVerify:
         # print('最终匹配',match_res)
         fix_pixel = self.fix_img(target_img,match_res)
         # print('fix_pixel',fix_pixel)
-        
+        try:
+            os.remove(target_img)
+        except(FileNotFoundError):
+            pass
         pyautogui.mouseDown()
         pyautogui.dragRel(xOffset=fix_pixel,yOffset=0,duration=1,button='left',mouseDownUp=False)
         pyautogui.mouseUp()
@@ -75,7 +78,7 @@ class XnwVerify:
         timestrmap = time.strftime('%Y%m%d-%H-%M-%S')
         newPath = os.path.join('./', '%s.png' % str(timestrmap))
         picture.save(newPath)
-        print('screenshot:', timestrmap, '.png')
+        # print('screenshot:', timestrmap, '.png')
         try:
             os.remove(imgPath)
         except(FileNotFoundError):
@@ -156,7 +159,7 @@ class XnwVerify:
         except(FileNotFoundError):
             print("文件不存在")
         # img.save('xinireila.png')    
-        return r_max - l_max
+        return r_max - l_max + 7
 
 class HfSwVerify:
     def __init__(self,driver):

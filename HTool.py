@@ -9,9 +9,8 @@ import os
 import configparser
 import time
 import datetime
-import sys
 import urllib.request
-import sqlite3
+# import sqlite3
 from time import sleep
 from urllib.parse import urlencode  #Python内置的HTTP请求库
 from selenium import webdriver
@@ -77,6 +76,15 @@ class HTool(HTMLParser):
             self.table_array[index] = self.content_array
         
         return self.table_array
+
+    # 计算数组里数字累计值
+    def rt_sum_val(self,sum_arr):
+        if len(sum_arr) == 0:
+            return 0
+        rt_val = 0    
+        for i in sum_arr:
+            rt_val += float(i.replace(',',''))
+        return round(rt_val,2)    
 
     def get_cookie(self,driver):
         # if self._cookie:
@@ -482,82 +490,82 @@ class HLogin:
         return self.set_driver_cookies(current_url,_cookie)
 
 
-class SqlTool:
+# class SqlTool:
 
-    def __init__(self):
-        self.conn = sqlite3.connect("xscw.db")
-        self.hd_cursor = self.conn.cursor()
+#     def __init__(self):
+#         self.conn = sqlite3.connect("xscw.db")
+#         self.hd_cursor = self.conn.cursor()
 
-    def search_datas(self,table,cond = [],search_field = ['*'],group_by = ''):
-        cond_field = []
-        ret = []
-        cond_str = ''
-        gorup_str = ''
-        for it in cond:
-            if type(cond[it]) is type(''):
-                cond_field.append(it+"='" + cond[it] + "'")
-            else:
-                cond_field.append(it + '=' + str(cond[it]))
-        if len(cond_field) > 0:
-            cond_str =  'WHERE ' + 'AND'.join(cond_field)
-        if group_by != '':
-            gorup_str = 'GROUP By '+ group_by 
+#     def search_datas(self,table,cond = [],search_field = ['*'],group_by = ''):
+#         cond_field = []
+#         ret = []
+#         cond_str = ''
+#         gorup_str = ''
+#         for it in cond:
+#             if type(cond[it]) is type(''):
+#                 cond_field.append(it+"='" + cond[it] + "'")
+#             else:
+#                 cond_field.append(it + '=' + str(cond[it]))
+#         if len(cond_field) > 0:
+#             cond_str =  'WHERE ' + 'AND'.join(cond_field)
+#         if group_by != '':
+#             gorup_str = 'GROUP By '+ group_by 
 
-        sql = "SELECT %s from %s %s %s;" % (','.join(search_field),table,cond_str,gorup_str)
+#         sql = "SELECT %s from %s %s %s;" % (','.join(search_field),table,cond_str,gorup_str)
         
-        self.hd_cursor.execute(sql)
-        col_name_list = [tuple[0] for tuple in self.hd_cursor.description]
-        # print(sql,col_name_list)
-        search_ret = self.hd_cursor.fetchall()
-        if len(search_ret) > 0:
-            for i in search_ret:
-                dic_one = {}
-                s_index = 0
-                for j in col_name_list:
-                    dic_one[j] = i[s_index]
-                    s_index += 1
-                # print(dic_one)    
-                ret.append(dic_one)
-        self.close_database()
-        return ret
+#         self.hd_cursor.execute(sql)
+#         col_name_list = [tuple[0] for tuple in self.hd_cursor.description]
+#         # print(sql,col_name_list)
+#         search_ret = self.hd_cursor.fetchall()
+#         if len(search_ret) > 0:
+#             for i in search_ret:
+#                 dic_one = {}
+#                 s_index = 0
+#                 for j in col_name_list:
+#                     dic_one[j] = i[s_index]
+#                     s_index += 1
+#                 # print(dic_one)    
+#                 ret.append(dic_one)
+#         self.close_database()
+#         return ret
 
-    def insert_row(self,table,insert_data):
-        insert_field = []
-        insert_value = []
-        for it in insert_data:
-            insert_field.append(it)
-            if type(insert_data[it]) is type(''):
-                insert_value.append("'" + insert_data[it] + "'")
-            else:    
-                insert_value.append(str(insert_data[it]))
-        sql = "INSERT INTO %s (id,%s) VALUES (NULL,%s);" % (table,','.join(insert_field),','.join(insert_value))
-        print(sql)
-        self.hd_cursor.execute(sql)
-        self.close_database()
+#     def insert_row(self,table,insert_data):
+#         insert_field = []
+#         insert_value = []
+#         for it in insert_data:
+#             insert_field.append(it)
+#             if type(insert_data[it]) is type(''):
+#                 insert_value.append("'" + insert_data[it] + "'")
+#             else:    
+#                 insert_value.append(str(insert_data[it]))
+#         sql = "INSERT INTO %s (id,%s) VALUES (NULL,%s);" % (table,','.join(insert_field),','.join(insert_value))
+#         print(sql)
+#         self.hd_cursor.execute(sql)
+#         self.close_database()
 
-    def update_rows(self,table,cond,update_data):
-        cond_field = []
-        update_value = []
-        for it in update_data:
-            if type(update_data[it]) is type(''):
-                update_value.append(it+"='" + update_data[it] + "'")
-            else:
-                update_value.append(it + '=' + str(update_data[it]))
+#     def update_rows(self,table,cond,update_data):
+#         cond_field = []
+#         update_value = []
+#         for it in update_data:
+#             if type(update_data[it]) is type(''):
+#                 update_value.append(it+"='" + update_data[it] + "'")
+#             else:
+#                 update_value.append(it + '=' + str(update_data[it]))
 
-        for it in cond:
-            if type(cond[it]) is type(''):
-                cond_field.append(it+"='" + cond[it] + "'")
-            else:
-                cond_field.append(it + '=' + str(cond[it]))  
-        sql = "UPDATE %s SET %s WHERE %s;" % (table,','.join(update_value),' AND '.join(cond_field))
-        print(sql)
-        self.hd_cursor.execute(sql)
-        self.close_database()
+#         for it in cond:
+#             if type(cond[it]) is type(''):
+#                 cond_field.append(it+"='" + cond[it] + "'")
+#             else:
+#                 cond_field.append(it + '=' + str(cond[it]))  
+#         sql = "UPDATE %s SET %s WHERE %s;" % (table,','.join(update_value),' AND '.join(cond_field))
+#         print(sql)
+#         self.hd_cursor.execute(sql)
+#         self.close_database()
 
-    def close_database(self):
-        self.hd_cursor.close()
-        self.conn.commit()
-        self.conn.close()
+#     def close_database(self):
+#         self.hd_cursor.close()
+#         self.conn.commit()
+#         self.conn.close()
 
 
 # test_sq = SqlTool()

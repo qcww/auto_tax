@@ -260,7 +260,7 @@ class Ep(ui.MainMenu):
                 try:
                     login_tool = HLogin(self.run_id)
                     task_split = self.task_arr[0].split('||')
-                    if task_split[-1] != '11':
+                    if task_split[-1] not in ['10','11','12']:
                         login_tool.login_wait()
                     self.syn_user_data(self.task_arr[0])
                 except Exception as e:
